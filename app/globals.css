@@ -1,0 +1,111 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Light theme — 璞石 stone-based */
+    --background: 60 9% 98%;          /* stone-50 */
+    --foreground: 24 10% 10%;         /* stone-900 */
+
+    --card: 0 0% 100%;
+    --card-foreground: 24 10% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 24 10% 10%;
+
+    --primary: 24 10% 10%;            /* stone-900 */
+    --primary-foreground: 60 9% 98%;
+
+    --secondary: 60 5% 96%;           /* stone-100 */
+    --secondary-foreground: 24 10% 10%;
+
+    --muted: 60 5% 96%;
+    --muted-foreground: 25 5% 45%;    /* stone-500 */
+
+    --accent: 60 5% 96%;
+    --accent-foreground: 24 10% 10%;
+
+    --destructive: 0 84% 60%;         /* red-500 */
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 158 64% 40%;           /* emerald-600 */
+    --success-foreground: 0 0% 100%;
+
+    --warning: 26 90% 37%;            /* amber-700 */
+    --warning-foreground: 0 0% 100%;
+
+    --danger: 0 84% 60%;
+    --danger-foreground: 0 0% 100%;
+
+    --border: 20 6% 90%;              /* stone-200 */
+    --input: 20 6% 90%;
+    --ring: 24 10% 10%;
+
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 24 10% 8%;          /* near stone-950 */
+    --foreground: 60 9% 96%;
+
+    --card: 24 10% 11%;
+    --card-foreground: 60 9% 96%;
+
+    --popover: 24 10% 11%;
+    --popover-foreground: 60 9% 96%;
+
+    --primary: 60 9% 96%;
+    --primary-foreground: 24 10% 10%;
+
+    --secondary: 24 6% 16%;
+    --secondary-foreground: 60 9% 96%;
+
+    --muted: 24 6% 16%;
+    --muted-foreground: 24 5% 64%;
+
+    --accent: 24 6% 16%;
+    --accent-foreground: 60 9% 96%;
+
+    --destructive: 0 70% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 158 64% 45%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 32 95% 50%;
+    --warning-foreground: 24 10% 10%;
+
+    --danger: 0 70% 55%;
+    --danger-foreground: 0 0% 100%;
+
+    --border: 24 6% 20%;
+    --input: 24 6% 20%;
+    --ring: 60 9% 84%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    @apply tracking-tight;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  /* Subtle paper-like grain for premium feel */
+  .bg-grain {
+    background-image:
+      radial-gradient(hsl(var(--muted-foreground) / 0.04) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+}
