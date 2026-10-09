@@ -3,6 +3,7 @@
 璞石集團 3D 渲染 AI 優化工作台。以「專案」為單位，把每個視角的 3D 原圖、AI 版本、參考圖放在同一張畫布上，用區域指令修改，並自動做鏡位校正、選區外回貼、水波紋篩查與 360 環景縫合。
 
 評估與設計依據：[`docs/RENDER-STUDIO-EVALUATION.md`](docs/RENDER-STUDIO-EVALUATION.md)
+交接與待辦：[`docs/HANDOFF.md`](docs/HANDOFF.md)｜給 Claude Code 的開發說明：[`CLAUDE.md`](CLAUDE.md)
 
 ## 功能
 
