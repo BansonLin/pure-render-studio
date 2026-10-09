@@ -443,7 +443,7 @@ export async function exportDelivery(projectId: string) {
   downloadBlob(new Blob([zip as BlobPart], { type: "application/zip" }), `${safe(p.code || p.name)}_交付包.zip`);
 }
 
-interface Backup {
+export interface Backup {
   format: "pure-render-studio";
   version: 1;
   project: RenderProject;
@@ -462,16 +462,37 @@ export async function exportBackup(projectId: string) {
   downloadBlob(new Blob([JSON.stringify(data)], { type: "application/json" }), `${safe(p.code || p.name)}_專案備份.json`);
 }
 
-export async function importBackup(file: File) {
+export interface ParsedBackup {
+  data: Backup;
+  /** 此裝置上已有同 ID 的專案（跨裝置來回搬移時常見） */
+  existing: RenderProject | null;
+}
+
+export async function readBackup(file: File): Promise<ParsedBackup> {
   const data = JSON.parse(await file.text()) as Backup;
   if (data.format !== "pure-render-studio" || data.version !== 1) throw new Error("不是工作台專案備份檔");
-  if (store().projects[data.project.id]) throw new Error("此專案已存在（同 ID），請先刪除再匯入");
+  return { data, existing: store().projects[data.project.id] ?? null };
+}
+
+/**
+ * 寫入備份。replace 時先寫新資料、最後才刪掉備份裡沒有的舊圖，
+ * 中途失敗也不會讓此裝置上的專案只剩一半。
+ */
+export async function importBackup({ data, existing }: ParsedBackup, opts: { replace?: boolean } = {}) {
+  if (existing && !opts.replace) throw new Error("此裝置已有同一個專案；要以備份覆蓋請確認後再匯入");
   for (const a of data.assets) {
     const { b64, ...meta } = a;
     await store().restoreAsset(meta, base64ToBlob(b64, meta.mime));
   }
-  const { putProject } = await import("./db");
+  const { deleteAssets, putProject } = await import("./db");
   await putProject(data.project);
+  if (existing) {
+    const keep = new Set(data.assets.map((a) => a.id));
+    const stale = Object.values(store().assets)
+      .filter((a) => a.projectId === data.project.id && !keep.has(a.id))
+      .map((a) => a.id);
+    await deleteAssets(stale);
+  }
   await store().loadAll();
   return data.project.id;
 }

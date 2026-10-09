@@ -73,6 +73,13 @@ function LoginForm() {
             <p className="text-xs text-muted-foreground">
               請檢查收件匣與垃圾信件夾。
             </p>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              連結在哪個瀏覽器打開，就登入在哪個瀏覽器：
+              <br />
+              請在要使用的這台裝置，用 Safari／Chrome 開啟；
+              <br />
+              在 Gmail、LINE 內建瀏覽器開啟時，請選「在瀏覽器中開啟」。
+            </p>
           </div>
         ) : (
           <form

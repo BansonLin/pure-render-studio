@@ -7,7 +7,7 @@ import { FolderOpen, Plus, Sparkles, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useRenderStore } from "@/store/render-store";
-import { importBackup } from "@/lib/render/actions";
+import { importBackup, readBackup } from "@/lib/render/actions";
 import { AssetImg, FileButton, inputCls, Modal, Pill, useBusy, useToast } from "./primitives";
 import { RenderBoot } from "./RenderBoot";
 
@@ -58,12 +58,25 @@ function ProjectListInner() {
             <Sparkles /> 載入範本：中道森活一樓
           </Button>
           <FileButton
-            accept="application/json"
+            accept="application/json,.json"
             className="inline-flex h-9 items-center gap-2 rounded-lg border border-border px-3 text-sm font-medium hover:bg-accent"
             onFiles={([f]) =>
               run("import", async () => {
-                const id = await importBackup(f);
-                toast.ok("已匯入專案備份");
+                const parsed = await readBackup(f);
+                const cur = parsed.existing;
+                if (cur) {
+                  const fileAt = parsed.data.project.updatedAt;
+                  const fmt = (t: string) => new Date(t).toLocaleString("zh-TW", { hour12: false });
+                  const older = fileAt < cur.updatedAt;
+                  const ok = confirm(
+                    `此裝置已有「${cur.name}」（最後修改 ${fmt(cur.updatedAt)}）。\n` +
+                      `備份檔最後修改 ${fmt(fileAt)}${older ? "，比此裝置上的版本舊" : ""}。\n\n` +
+                      `要以備份檔覆蓋此裝置上的專案嗎？${older ? "此裝置上較新的修改會消失。" : ""}`,
+                  );
+                  if (!ok) return;
+                }
+                const id = await importBackup(parsed, { replace: !!cur });
+                toast.ok(cur ? "已用備份更新此專案" : "已匯入專案備份");
                 router.push(`/p/${id}`);
               })
             }
@@ -74,7 +87,7 @@ function ProjectListInner() {
       </section>
 
       <div className="rounded-lg border border-warning/30 bg-warning/5 px-4 py-2.5 text-xs text-warning">
-        V1 資料只存在這台電腦的瀏覽器（IndexedDB），換電腦或清除網站資料會消失。重要專案請在工作台「交付」分頁匯出備份。
+        V1 資料只存在這台裝置的瀏覽器，電腦、平板、手機彼此不同步，清除網站資料也會消失。換裝置接續：在「交付」分頁匯出專案備份，到另一台按「匯入備份」。
       </div>
 
       {list.length === 0 ? (
