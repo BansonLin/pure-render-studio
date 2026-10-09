@@ -12,6 +12,10 @@ export function RenderBoot({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     if (!ready) loadAll();
   }, [ready, loadAll]);
+  React.useEffect(() => {
+    // 專案只存在瀏覽器；申請長期保存，降低空間不足時被瀏覽器清掉的機會（瀏覽器可拒絕，不影響使用）
+    navigator.storage?.persist?.().catch(() => {});
+  }, []);
   if (!ready) {
     return (
       <div className="flex flex-1 items-center justify-center gap-2 p-12 text-sm text-muted-foreground">

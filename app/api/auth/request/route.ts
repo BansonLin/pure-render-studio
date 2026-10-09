@@ -57,6 +57,7 @@ export async function POST(req: NextRequest) {
           `<h2 style="color:#1c1917">璞石 Render Studio</h2>`,
           `<p>點擊下方按鈕登入（15 分鐘內有效、僅可使用一次瀏覽器 session）：</p>`,
           `<p style="margin:24px 0"><a href="${link}" style="background:#1c1917;color:#fafaf9;padding:12px 24px;border-radius:8px;text-decoration:none">登入渲染工作台</a></p>`,
+          `<p style="color:#78716c;font-size:12px">連結在哪個瀏覽器打開，就登入在哪個瀏覽器。平板／手機請在要使用的那台裝置用 Safari 或 Chrome 開啟；在 Gmail、LINE 內建瀏覽器開啟時，請改選「在瀏覽器中開啟」。</p>`,
           `<p style="color:#78716c;font-size:12px">若您沒有要求登入，請忽略此信。</p>`,
           `</div>`,
         ].join(""),

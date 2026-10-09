@@ -1,6 +1,6 @@
 # CLAUDE.md — 璞石 Render Studio
 
-給 Claude Code 的專案說明。完整背景、決策紀錄與待辦見 [`docs/HANDOFF.md`](docs/HANDOFF.md)；設計依據與實測數據見 [`docs/RENDER-STUDIO-EVALUATION.md`](docs/RENDER-STUDIO-EVALUATION.md)。
+給 Claude Code 的專案說明。完整背景、決策紀錄與待辦見 [`docs/HANDOFF.md`](docs/HANDOFF.md)；設計依據與實測數據見 [`docs/RENDER-STUDIO-EVALUATION.md`](docs/RENDER-STUDIO-EVALUATION.md)；平板／手機操作見 [`docs/DEVICE-GUIDE.md`](docs/DEVICE-GUIDE.md)。
 
 ## 使用者與溝通
 
@@ -66,6 +66,7 @@ Next.js 14.2（App Router）＋ TypeScript ＋ Tailwind（CSS 變數色票，支
 - **水波紋篩查**：DoG 帶通（σ 0.8／2.6）＋排除邊緣＋逐格能量對照原圖＋結構張量一致性加權。這是「篩查輔助」，已知誤報：百葉陰影、薄紗窗簾褶。
 - **提示詞分段**：IMAGE ROLES / PRESERVE / CHANGES / SCENE CONTRACT / SURFACE / LIGHTING / CONSISTENCY / STYLE / REJECT；有編輯區時場景契約自動關閉。
 - **360 縫合**：投影到 equirect → 用接縫樣本（優先重疊區）做對數域增益校色，增益夾在 0.74–1.35 → 羽化 → 極區補色並標記為「非真實」→ 接縫報告。
+- **跨裝置**：資料不同步，靠「專案備份」JSON 搬移；`importBackup(parsed, { replace })` 先寫新資料、最後才刪舊圖。**不要加 `display: standalone` 的 web manifest**：iOS 主畫面網頁 App 與 Safari 分開存登入與資料，magic link 會開在 Safari，使用者會卡在登入頁（登入改驗證碼後再評估）。
 - **畫布手勢**（`CanvasBoard.tsx`）：以 pointerId 追蹤，單指平移、雙指縮放；新鏡頭一律由「手勢開始時的快照」計算，**不要在 setState updater 裡讀 ref**（曾造成手機雙指收合當機）。觸控時卡片標頭交給畫布平移，拖曳排列只限滑鼠。
 
 ## 測試
