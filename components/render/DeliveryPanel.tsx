@@ -105,14 +105,17 @@ export function DeliveryPanel({ project }: { project: RenderProject }) {
         <p className="text-[11px] text-muted-foreground">
           每個視角首次生成後，允許幾輪「定向修正」。達上限時工作台會提醒停下來人工判斷，而不是無限重跑（一樓 v3 曾 40 筆生成仍有角落殘紋）。
         </p>
-        <input
-          type="number"
-          min={0}
-          max={10}
+        <select
           className={inputCls}
           value={project.repairLimit}
-          onChange={(e) => mutate(project.id, (d) => void (d.repairLimit = Math.max(0, Number(e.target.value) || 0)))}
-        />
+          onChange={(e) => mutate(project.id, (d) => void (d.repairLimit = Number(e.target.value)))}
+        >
+          {Array.from({ length: Math.max(11, project.repairLimit + 1) }, (_, n) => (
+            <option key={n} value={n}>
+              {n === 0 ? "0 輪（不做修正，直接人工判斷）" : `${n} 輪${n === 2 ? "（建議）" : ""}`}
+            </option>
+          ))}
+        </select>
       </section>
     </main>
   );

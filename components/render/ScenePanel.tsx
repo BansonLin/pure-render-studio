@@ -3,6 +3,7 @@
 import * as React from "react";
 import { ImagePlus, Lock, Plus, Trash2, Unlock } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ANCHOR_SUGGESTIONS } from "@/lib/render/options";
 import { Button } from "@/components/ui/button";
 import { useAssetUrl, useRenderStore } from "@/store/render-store";
 import { addAssetFromFile } from "@/lib/render/actions";
@@ -179,17 +180,33 @@ function ObjectEditor({ o, onChange }: { o: SceneObject; onChange: (fn: (o: Scen
         <div className="grid grid-cols-3 gap-2">
           <label className="space-y-1 text-[11px] font-medium">
             全場景數量
-            <input
+            <select
               className={inputCls}
-              type="number"
-              min={0}
-              value={o.count ?? ""}
+              value={o.count === null ? "" : String(o.count)}
               onChange={(e) => onChange((x) => void (x.count = e.target.value === "" ? null : Number(e.target.value)))}
-            />
+            >
+              <option value="">不適用</option>
+              {Array.from({ length: Math.max(21, (o.count ?? 0) + 1) }, (_, n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="col-span-2 space-y-1 text-[11px] font-medium">
             空間錨點（不用畫面左右）
-            <input className={inputCls} value={o.anchor} placeholder="例：茶几靠前窗端" onChange={(e) => onChange((x) => void (x.anchor = e.target.value))} />
+            <input
+              className={inputCls}
+              list="anchor-suggestions"
+              value={o.anchor}
+              placeholder="可選或輸入，例：茶几靠前窗端"
+              onChange={(e) => onChange((x) => void (x.anchor = e.target.value))}
+            />
+            <datalist id="anchor-suggestions">
+              {ANCHOR_SUGGESTIONS.map((a) => (
+                <option key={a} value={a} />
+              ))}
+            </datalist>
           </label>
         </div>
         <label className="block space-y-1 text-[11px] font-medium">

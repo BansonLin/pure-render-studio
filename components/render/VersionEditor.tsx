@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import {
   ArrowDown,
   Brush,
@@ -14,6 +15,7 @@ import {
   MousePointer2,
   Package,
   Send,
+  Sparkles,
   Square,
   Target,
   Trash2,
@@ -39,6 +41,8 @@ import {
 import { preflight, shapeBounds, describeArea } from "@/lib/render/compiler";
 import { BLOCK_CATEGORY_LABEL, PROMPT_BLOCKS, type BlockCategory } from "@/lib/render/prompt-blocks";
 import { fetchLiveStatus, PROVIDER_CAPS, type LiveStatus } from "@/lib/render/provider";
+import { rememberApprover, useDeviceSettings, useDeviceUsage } from "@/lib/render/settings";
+import { estimateCost, runClaudeReview } from "@/lib/render/claude";
 import { REFERENCE_ROLE_LABEL } from "@/lib/render/types";
 import type { BaseStrategy, QaVerdict, ReferenceRole, Region, RenderProject, Version } from "@/lib/render/types";
 import { repairsUsed, STATE_LABEL } from "@/lib/render/workflow";
@@ -320,6 +324,17 @@ export function VersionEditor({
                   run("repair", async () => {
                     const id = await createDraft(project.id, v.viewId, "parent", v.id);
                     onSwitch(id);
+                  })
+                }
+                onClaude={() =>
+                  run("claude", async () => {
+                    const review = await runClaudeReview(project, v);
+                    await patch((x) => {
+                      if (!x.qa) return;
+                      x.qa.aiReview = review;
+                      x.events.push({ at: review.at, type: "ai_review", detail: `${review.model}：${review.issues.length} 項問題` });
+                    });
+                    toast.ok(review.issues.length ? `Claude 找到 ${review.issues.length} 項問題，請逐項確認` : "Claude 沒有發現明顯問題，仍請人工確認");
                   })
                 }
               />
@@ -814,9 +829,15 @@ function RunTab({
   onMarkFailed: () => void;
   onReopen: () => void;
 }) {
-  const [provider, setProvider] = React.useState<"manual" | "openai">("manual");
+  const device = useDeviceSettings();
+  const usage = useDeviceUsage();
+  const deviceReady = !!(device.openai.key && device.openai.model);
+  // 有設定金鑰就預設走 API，省掉 ChatGPT 往返；沒有就維持手動
+  const [provider, setProvider] = React.useState<"manual" | "openai">(deviceReady ? "openai" : "manual");
   const [consent, setConsent] = React.useState(false);
-  const [quality, setQuality] = React.useState<"medium" | "high">("high");
+  const [quality, setQuality] = React.useState<"medium" | "high">(device.openai.quality);
+  const capLeft = device.openai.monthlyCap === null ? null : device.openai.monthlyCap - usage.openaiImages;
+  const apiReady = deviceReady || !!live?.live;
   const blocked = risks.some((r) => r.level === "error");
   const fileRef = React.useRef<HTMLInputElement>(null);
   const hasRegions = v.regions.some((r) => r.kind !== "lock");
@@ -865,11 +886,20 @@ function RunTab({
         </Section>
       ) : (
         <Section title="API 生成">
-          {!live?.live ? (
-            <p className="rounded-md bg-muted px-3 py-2 text-[11px] text-muted-foreground">{live?.reason ?? "檢查中…"}</p>
+          {!apiReady ? (
+            <p className="rounded-md bg-muted px-3 py-2 text-[11px] text-muted-foreground">
+              還沒有可用的 OpenAI 金鑰。到右上角
+              <Link href="/settings" className="mx-1 font-medium text-foreground underline">
+                設定
+              </Link>
+              填入金鑰即可直接出圖。
+            </p>
           ) : (
             <>
-              <p className="text-[11px] text-muted-foreground">模型：{live.model}（由伺服器設定）</p>
+              <p className="text-[11px] text-muted-foreground">
+                模型：{deviceReady ? `${device.openai.model}（本裝置設定）` : `${live?.model}（伺服器共用金鑰）`}
+                {capLeft !== null && `｜本月本裝置剩 ${Math.max(0, capLeft)} 張`}
+              </p>
               <Segmented<"medium" | "high">
                 value={quality}
                 onChange={setQuality}
@@ -882,7 +912,7 @@ function RunTab({
                 <input type="checkbox" className="mt-0.5" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
                 我有權使用這些圖片，同意將底圖、遮罩與參考圖傳送至 OpenAI 進行付費處理（1 張、不自動重試）。
               </label>
-              <Button className="w-full" disabled={!consent || !!busy || blocked || !canRun} onClick={() => onApi(quality)}>
+              <Button className="w-full" disabled={!consent || !!busy || blocked || !canRun || (capLeft !== null && capLeft <= 0)} onClick={() => onApi(quality)}>
                 {busy === "api" ? <Loader2 className="animate-spin" /> : <Send />} 送出生成
               </Button>
             </>
@@ -969,6 +999,7 @@ function QaTab({
   onState,
   onAccept,
   onRepair,
+  onClaude,
 }: {
   project: RenderProject;
   v: Version;
@@ -977,8 +1008,10 @@ function QaTab({
   onState: (s: Version["state"], detail?: string) => void;
   onAccept: (by: string, note: string) => void;
   onRepair: () => void;
+  onClaude: () => void;
 }) {
-  const [by, setBy] = React.useState("");
+  const device = useDeviceSettings();
+  const [by, setBy] = React.useState(device.approvers[0] ?? "");
   const [note, setNote] = React.useState("");
   const rawUrl = useAssetUrl(v.rawResultAssetId);
   if (!v.qa) {
@@ -1040,11 +1073,33 @@ function QaTab({
         </Section>
       )}
 
+      <ClaudeSection v={v} busy={busy} claudeReady={!!(device.claude.key && device.claude.model)} model={device.claude.model} onRun={onClaude} onAdoptAll={() =>
+        patch((x) => {
+          for (const s of x.qa?.aiReview?.checks ?? []) {
+            const c = x.qa!.checks.find((cc) => cc.id === s.id);
+            if (c && c.verdict === null) {
+              c.verdict = s.verdict;
+              if (s.verdict !== "pass") c.note = `Claude：${s.reason}`;
+            }
+          }
+        })
+      } />
+
       <Section title="人工檢查清單" hint={`${v.qa.checks.length - unchecked}/${v.qa.checks.length} 已判定`}>
         <div className="space-y-2">
           {v.qa.checks.map((c, i) => (
             <div key={c.id} className="space-y-1 rounded-md border border-border p-2">
               <p className="text-xs">{c.label}</p>
+              <AiHint
+                suggestion={v.qa?.aiReview?.checks.find((s) => s.id === c.id)}
+                adopted={c.verdict !== null}
+                onAdopt={(s) =>
+                  patch((x) => {
+                    x.qa!.checks[i].verdict = s.verdict;
+                    x.qa!.checks[i].note = s.verdict === "pass" ? x.qa!.checks[i].note : `Claude：${s.reason}`;
+                  })
+                }
+              />
               <div className="flex gap-1">
                 {(
                   [
@@ -1067,12 +1122,7 @@ function QaTab({
                 ))}
               </div>
               {(c.verdict === "fail" || c.verdict === "uncertain") && (
-                <input
-                  className="w-full rounded border border-border bg-card px-1.5 py-1 text-[11px]"
-                  placeholder="位置與問題，例：右下角地毯仍有迷宮紋"
-                  value={c.note}
-                  onChange={(e) => patch((x) => void (x.qa!.checks[i].note = e.target.value))}
-                />
+                <IssueNote value={c.note} onChange={(n) => patch((x) => void (x.qa!.checks[i].note = n))} />
               )}
             </div>
           ))}
@@ -1118,10 +1168,33 @@ function QaTab({
         {v.state === "human_review_pending" && (
           <div className="space-y-2 rounded-lg border border-border p-3">
             <p className="text-xs font-semibold">人工核准</p>
-            <input className={inputCls} placeholder="核准者姓名" value={by} onChange={(e) => setBy(e.target.value)} />
-            <input className={inputCls} placeholder="說明（選填）：例：四角已原尺寸檢查" value={note} onChange={(e) => setNote(e.target.value)} />
+            <input className={inputCls} list="approver-options" placeholder="核准者（可選或輸入）" value={by} onChange={(e) => setBy(e.target.value)} />
+            <datalist id="approver-options">
+              {device.approvers.map((a) => (
+                <option key={a} value={a} />
+              ))}
+            </datalist>
+            <select className={inputCls} value={ACCEPT_NOTES.includes(note) ? note : note ? "__custom" : ""} onChange={(e) => setNote(e.target.value === "__custom" ? " " : e.target.value)}>
+              <option value="">核准說明（選填）</option>
+              {ACCEPT_NOTES.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+              <option value="__custom">其他（自行輸入）</option>
+            </select>
+            {note && !ACCEPT_NOTES.includes(note) && (
+              <input className={inputCls} autoFocus placeholder="自行輸入說明" value={note.trimStart()} onChange={(e) => setNote(e.target.value || " ")} />
+            )}
             {unchecked > 0 && <p className="text-[11px] text-warning">仍有 {unchecked} 項未判定。</p>}
-            <Button className="w-full" disabled={!by.trim() || !!busy} onClick={() => onAccept(by, note)}>
+            <Button
+              className="w-full"
+              disabled={!by.trim() || !!busy}
+              onClick={() => {
+                rememberApprover(by);
+                onAccept(by, note.trim());
+              }}
+            >
               <Check /> 核准此版本
             </Button>
           </div>
@@ -1145,3 +1218,167 @@ function Stat({ label, value, warn }: { label: string; value: string; warn?: boo
   );
 }
 
+
+const ACCEPT_NOTES = ["四角已原尺寸檢查", "與主圖物件一致", "選區外已回貼原圖", "客戶已確認", "僅供內部示意"];
+
+const ISSUE_PLACES = ["左上", "上方", "右上", "左側", "中央", "右側", "左下", "下方", "右下", "全圖"];
+const ISSUE_PROBLEMS = [
+  "布面／地毯有水波紋、迷宮紋",
+  "角落或窄縫殘紋",
+  "門窗位置或形狀改變",
+  "牆線、櫃體分割跑掉",
+  "構圖被縮放或位移",
+  "物件數量不符",
+  "物件被移動或變形",
+  "多出原圖沒有的物件",
+  "材質與指令不符",
+  "嵌燈亮點光暈",
+  "日光方向不對",
+  "與主圖物件不一致",
+];
+
+/** 問題備註以「位置：問題」存成一段文字，舊資料的自由文字也照常顯示 */
+function IssueNote({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const m = value.match(/^(左上|上方|右上|左側|中央|右側|左下|下方|右下|全圖)：([\s\S]*)$/);
+  const place = m ? m[1] : "";
+  const text = m ? m[2] : value;
+  const join = (p: string, t: string) => (p ? `${p}：${t}` : t);
+  return (
+    <div className="flex gap-1">
+      <select
+        aria-label="問題位置"
+        className="w-[4.5rem] shrink-0 rounded border border-border bg-card px-1 py-1 text-[11px]"
+        value={place}
+        onChange={(e) => onChange(join(e.target.value, text))}
+      >
+        <option value="">位置</option>
+        {ISSUE_PLACES.map((p) => (
+          <option key={p} value={p}>
+            {p}
+          </option>
+        ))}
+      </select>
+      <input
+        aria-label="問題"
+        list="qa-problem-options"
+        className="min-w-0 flex-1 rounded border border-border bg-card px-1.5 py-1 text-[11px]"
+        placeholder="選擇或輸入問題"
+        value={text}
+        onChange={(e) => onChange(join(place, e.target.value))}
+      />
+      <datalist id="qa-problem-options">
+        {ISSUE_PROBLEMS.map((p) => (
+          <option key={p} value={p} />
+        ))}
+      </datalist>
+    </div>
+  );
+}
+
+const VERDICT_TEXT = { pass: "通過", fail: "待修", uncertain: "不確定" } as const;
+const VERDICT_TONE = { pass: "text-success", fail: "text-danger", uncertain: "text-warning" } as const;
+
+function AiHint({
+  suggestion,
+  adopted,
+  onAdopt,
+}: {
+  suggestion: { verdict: "pass" | "fail" | "uncertain"; reason: string } | undefined;
+  adopted: boolean;
+  onAdopt: (s: { verdict: "pass" | "fail" | "uncertain"; reason: string }) => void;
+}) {
+  if (!suggestion) return null;
+  return (
+    <div className="flex items-start gap-1.5 rounded bg-muted/60 px-1.5 py-1 text-[11px]">
+      <Sparkles className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
+      <p className="min-w-0 flex-1 text-muted-foreground">
+        <span className={cn("font-semibold", VERDICT_TONE[suggestion.verdict])}>Claude 建議{VERDICT_TEXT[suggestion.verdict]}</span>
+        ：{suggestion.reason}
+      </p>
+      {!adopted && (
+        <button className="shrink-0 rounded border border-border px-1.5 hover:bg-accent" onClick={() => onAdopt(suggestion)}>
+          採用
+        </button>
+      )}
+    </div>
+  );
+}
+
+const FOLLOWED_TEXT = { yes: "已照指令修改", partial: "部分照做", no: "沒有照指令", unclear: "無法判斷" } as const;
+const SEVERITY = {
+  high: ["嚴重", "bg-danger/15 text-danger"],
+  medium: ["中等", "bg-warning/15 text-warning"],
+  low: ["輕微", "bg-muted text-muted-foreground"],
+} as const;
+
+function ClaudeSection({
+  v,
+  busy,
+  claudeReady,
+  model,
+  onRun,
+  onAdoptAll,
+}: {
+  v: Version;
+  busy: string | null;
+  claudeReady: boolean;
+  model: string;
+  onRun: () => void;
+  onAdoptAll: () => void;
+}) {
+  const r = v.qa?.aiReview ?? null;
+  const cost = r ? estimateCost(r.model, r.usage) : null;
+  return (
+    <Section title="Claude 看圖驗收" hint="建議，最後仍由人判定">
+      {!claudeReady ? (
+        <p className="rounded-md bg-muted px-3 py-2 text-[11px] text-muted-foreground">
+          到右上角
+          <Link href="/settings" className="mx-1 font-medium text-foreground underline">
+            設定
+          </Link>
+          填入 Claude 金鑰，就能讓 Claude 對照底圖逐項檢查。
+        </p>
+      ) : (
+        <>
+          <Button size="sm" variant={r ? "outline" : "default"} className="w-full" disabled={!!busy} onClick={onRun}>
+            {busy === "claude" ? <Loader2 className="animate-spin" /> : <Sparkles />} {r ? "重新請 Claude 檢查" : "請 Claude 檢查"}
+          </Button>
+          <p className="text-[11px] text-muted-foreground">
+            模型 {model}｜會把底圖與結果圖送到 Anthropic；約需 30–90 秒。
+          </p>
+        </>
+      )}
+      {r && (
+        <div className="space-y-2 rounded-lg border border-border p-2.5 text-xs">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Pill tone={r.instructionsFollowed === "yes" ? "ok" : r.instructionsFollowed === "unclear" ? "muted" : "warn"}>
+              {FOLLOWED_TEXT[r.instructionsFollowed]}
+            </Pill>
+            <Pill tone={r.issues.some((i) => i.severity === "high") ? "bad" : r.issues.length ? "warn" : "ok"}>{r.issues.length} 項問題</Pill>
+          </div>
+          <p className="leading-relaxed">{r.summary}</p>
+          {r.issues.length > 0 && (
+            <ul className="space-y-1">
+              {r.issues.map((i, k) => (
+                <li key={k} className="flex items-start gap-1.5 text-[11px]">
+                  <span className={cn("shrink-0 rounded px-1 font-semibold", SEVERITY[i.severity][1])}>{SEVERITY[i.severity][0]}</span>
+                  <span className="shrink-0 font-medium">{i.location}</span>
+                  <span className="text-muted-foreground">{i.problem}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {r.checks.length > 0 && (
+            <Button size="sm" variant="outline" className="w-full" onClick={onAdoptAll}>
+              把建議填進尚未判定的檢查項
+            </Button>
+          )}
+          <p className="text-[10px] text-muted-foreground">
+            {r.model}・{new Date(r.at).toLocaleString("zh-TW", { hour12: false })}
+            {cost !== null && `・約 US$${cost.toFixed(3)}`}
+          </p>
+        </div>
+      )}
+    </Section>
+  );
+}

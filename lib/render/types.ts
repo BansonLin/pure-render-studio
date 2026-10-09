@@ -161,10 +161,24 @@ export interface RippleReport {
   analyzedAt: string;
 }
 
+/** Claude 看圖驗收的建議；只是建議，判定仍由人按 */
+export interface AiReview {
+  at: string;
+  /** 實際回應的模型（有 fallback 時可能與設定不同） */
+  model: string;
+  summary: string;
+  instructionsFollowed: "yes" | "partial" | "no" | "unclear";
+  checks: { id: string; verdict: "pass" | "fail" | "uncertain"; reason: string }[];
+  issues: { location: string; problem: string; severity: "high" | "medium" | "low" }[];
+  usage: { input: number; output: number } | null;
+}
+
 export interface QaRecord {
   ripple: RippleReport | null;
   checks: QaCheck[];
   alignment: { dx: number; dy: number; scale: number; residual: number; similarity: number } | null;
+  /** 選填：舊專案沒有這個欄位 */
+  aiReview?: AiReview | null;
 }
 
 export interface Acceptance {

@@ -13,7 +13,8 @@ import { VersionEditor } from "./VersionEditor";
 import { ScenePanel } from "./ScenePanel";
 import { PanoPanel } from "./PanoPanel";
 import { DeliveryPanel } from "./DeliveryPanel";
-import { AssetImg, inputCls, Modal, Pill, useBusy, useToast } from "./primitives";
+import { AssetImg, ChoiceInput, inputCls, Modal, Pill, useBusy, useToast } from "./primitives";
+import { ROOM_OPTIONS, SHOT_OPTIONS, STYLE_PRESETS } from "@/lib/render/options";
 import { RenderBoot } from "./RenderBoot";
 
 type WsTab = "canvas" | "scene" | "pano" | "delivery";
@@ -37,6 +38,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
   const [original, setOriginal] = React.useState<string | null>(null);
   const [newView, setNewView] = React.useState(false);
   const [nv, setNv] = React.useState({ id: "", name: "", room: "", role: "standalone" as ViewRole, dependsOn: [] as string[] });
+  const [shot, setShot] = React.useState("");
 
   if (!project) {
     return (
@@ -105,11 +107,17 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
             <span className="hidden lg:inline">風格基準：</span>
             <input
               className="hidden min-w-[240px] flex-1 rounded border border-transparent bg-transparent px-1 text-[11px] hover:border-border focus:border-border lg:block"
-              placeholder="全案風格方向（會寫進每份提示詞）"
+              list="style-presets"
+              placeholder="全案風格方向（可選或輸入，會寫進每份提示詞）"
               value={project.styleBrief}
               onChange={(e) => mutate(project.id, (d) => void (d.styleBrief = e.target.value))}
             />
           </div>
+          <datalist id="style-presets">
+            {STYLE_PRESETS.map((x) => (
+              <option key={x} value={x} />
+            ))}
+          </datalist>
           <div className="relative min-h-[420px] flex-1">
             <CanvasBoard
               project={project}
@@ -117,7 +125,13 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
                 onOpenVersion: setEditing,
                 onNewVersion: newVersion,
                 onOpenOriginal: setOriginal,
-                onAddView: () => setNewView(true),
+                onAddView: () => {
+                  // 編號預設接在現有最大號之後，多數情況直接按新增即可
+                  const nums = project.views.map((v) => Number(v.id)).filter((n) => Number.isFinite(n));
+                  setNv({ id: nums.length ? String(Math.max(...nums) + 1) : "1", name: "", room: "", role: "standalone", dependsOn: [] });
+                  setShot("");
+                  setNewView(true);
+                },
                 onError: toast.bad,
               }}
             />
@@ -173,23 +187,51 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
               await addView(project.id, nv);
               setNewView(false);
               setNv({ id: "", name: "", room: "", role: "standalone", dependsOn: [] });
+              setShot("");
             });
           }}
         >
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1 text-xs font-medium">
+              空間
+              <ChoiceInput
+                value={nv.room}
+                onChange={(room) => setNv({ ...nv, room, name: !nv.name || nv.name === `${nv.room}${shot}` ? `${room}${shot}` : nv.name })}
+                options={ROOM_OPTIONS}
+                emptyLabel="請選擇"
+                placeholder="例：視聽室"
+              />
+            </div>
+            <label className="space-y-1 text-xs font-medium">
+              景別
+              <select
+                className={inputCls}
+                value={shot}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setShot(next);
+                  if (!nv.name || nv.name === `${nv.room}${shot}`) setNv({ ...nv, name: `${nv.room}${next}` });
+                }}
+              >
+                <option value="">請選擇</option>
+                {SHOT_OPTIONS.map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
           <div className="grid grid-cols-3 gap-2">
             <label className="space-y-1 text-xs font-medium">
               編號
-              <input className={inputCls} value={nv.id} onChange={(e) => setNv({ ...nv, id: e.target.value.trim() })} placeholder="21" />
+              <input className={inputCls} inputMode="numeric" value={nv.id} onChange={(e) => setNv({ ...nv, id: e.target.value.trim() })} placeholder="21" />
             </label>
             <label className="col-span-2 space-y-1 text-xs font-medium">
-              名稱
+              名稱（自動帶入，可改）
               <input className={inputCls} value={nv.name} onChange={(e) => setNv({ ...nv, name: e.target.value })} placeholder="餐廚正景" />
             </label>
           </div>
-          <label className="block space-y-1 text-xs font-medium">
-            空間
-            <input className={inputCls} value={nv.room} onChange={(e) => setNv({ ...nv, room: e.target.value })} placeholder="餐廚／主臥／玄關" />
-          </label>
           <label className="block space-y-1 text-xs font-medium">
             角色
             <select className={inputCls} value={nv.role} onChange={(e) => setNv({ ...nv, role: e.target.value as ViewRole, dependsOn: e.target.value === "derived" ? nv.dependsOn : [] })}>

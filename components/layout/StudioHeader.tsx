@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LogOut } from "lucide-react";
+import { LogOut, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 
@@ -27,6 +27,11 @@ export function StudioHeader({ description }: StudioHeaderProps) {
       </p>
       <div className="flex-1 sm:hidden" />
 
+      <Button asChild variant="ghost" size="icon" aria-label="設定">
+        <Link href="/settings">
+          <Settings />
+        </Link>
+      </Button>
       <ThemeToggle />
       <form action="/api/auth/logout" method="POST">
         <Button variant="ghost" size="icon" aria-label="登出" type="submit">

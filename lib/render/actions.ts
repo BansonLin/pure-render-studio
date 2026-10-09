@@ -5,7 +5,8 @@ import { annotationGuide, buildCandidate, maskPng, runRippleQa } from "./composi
 import { COMPILER_VERSION, compilePrompt, shapeBounds } from "./compiler";
 import { canvasToBlob, ctx2d, decodeImage, downloadBlob, makeCanvas, uid, blobToBase64, base64ToBlob } from "./image";
 import { DEFAULT_BLOCK_IDS } from "./prompt-blocks";
-import { generateViaApi, OutcomeUnknownError, PROVIDER_CAPS } from "./provider";
+import { generateViaApi, generateViaOpenAIDirect, OutcomeUnknownError, PROVIDER_CAPS } from "./provider";
+import { assertOpenAIQuota, bumpUsage, readSettings } from "./settings";
 import { REFERENCE_ROLE_LABEL } from "./types";
 import type { AssetKind, AssetMeta, BaseStrategy, ReferenceSlot, RenderProject, Version } from "./types";
 import { childDepth, DEFAULT_QA_CHECKS, invalidateDependents, nextLabel, versionsOf } from "./workflow";
@@ -317,22 +318,29 @@ export async function runApiGeneration(projectId: string, versionId: string, opt
     if (b) refs.push(await toJpeg(b, 768));
   }
   const requestId = uid("req");
+  const device = readSettings().openai;
+  const direct = !!(device.key && device.model);
+  assertOpenAIQuota();
   await patchVersion(projectId, versionId, (x) => {
     x.compiledPrompt = prompt;
     x.provider = "openai";
     x.providerJobId = requestId;
     x.pinnedMasters = pinMasters(p, v.viewId);
     x.state = "submitted";
-    x.events.push({ at: now(), type: "api_submitted", detail: requestId });
+    x.events.push({ at: now(), type: "api_submitted", detail: `${requestId}（${direct ? `本裝置金鑰 ${device.model}` : "伺服器金鑰"}）` });
   });
   try {
-    const out = await generateViaApi({ requestId, prompt, base: baseJ, mask, references: refs, quality: opts.quality });
+    const input = { requestId, prompt, base: baseJ, mask, references: refs, quality: opts.quality };
+    const out = direct ? await generateViaOpenAIDirect(input, { key: device.key, model: device.model }) : await generateViaApi(input);
+    bumpUsage("openaiImages");
     await patchVersion(projectId, versionId, (x) => {
       x.events.push({ at: now(), type: "api_returned", detail: `model=${out.model ?? "unknown"}` });
     });
     return importResult(projectId, versionId, out.image, opts);
   } catch (e) {
     const unknown = e instanceof OutcomeUnknownError;
+    // 明確被拒（金鑰錯、未驗證）不計費；結果未知可能已計費，寧可多算
+    if (unknown) bumpUsage("openaiImages");
     await patchVersion(projectId, versionId, (x) => {
       x.state = unknown ? "outcome_unknown" : "failed";
       x.events.push({ at: now(), type: unknown ? "outcome_unknown" : "failed", detail: (e as Error).message });
