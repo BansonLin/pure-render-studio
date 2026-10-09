@@ -33,9 +33,20 @@ export function CanvasBoard({ project, h }: { project: RenderProject; h: CanvasH
   const mutate = useRenderStore((s) => s.mutate);
   const wrap = React.useRef<HTMLDivElement>(null);
   const [cam, setCam] = React.useState<Cam>({ x: 24, y: 16, k: 0.85 });
-  const pan = React.useRef<{ x: number; y: number; cx: number; cy: number } | null>(null);
+  const camRef = React.useRef(cam);
+  camRef.current = cam;
+  // 以 pointerId 追蹤每根手指／滑鼠：單指平移、雙指縮放。
+  // 手勢一律從「開始時的快照」算出新鏡頭，不在 setState updater 內讀 ref，
+  // 否則另一根手指放開把 ref 清空時會讀到 null（手機雙指收合當機的根因）。
+  const pointers = React.useRef(new Map<number, { x: number; y: number }>());
+  const gesture = React.useRef<
+    | { kind: "pan"; x: number; y: number; cam: Cam }
+    | { kind: "pinch"; d: number; mx: number; my: number; cam: Cam }
+    | null
+  >(null);
   const [dragLane, setDragLane] = React.useState<{
     id: string;
+    pid: number;
     sx: number;
     sy: number;
     px: number;
@@ -92,13 +103,43 @@ export function CanvasBoard({ project, h }: { project: RenderProject; h: CanvasH
     return () => el.removeEventListener("wheel", stop);
   }, []);
 
+  const beginGesture = () => {
+    const pts = Array.from(pointers.current.values());
+    const el = wrap.current;
+    if (pts.length >= 2 && el) {
+      const r = el.getBoundingClientRect();
+      const [a, b] = pts;
+      gesture.current = {
+        kind: "pinch",
+        d: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)),
+        mx: (a.x + b.x) / 2 - r.left,
+        my: (a.y + b.y) / 2 - r.top,
+        cam: camRef.current,
+      };
+    } else if (pts.length === 1) {
+      gesture.current = { kind: "pan", x: pts[0].x, y: pts[0].y, cam: camRef.current };
+    } else {
+      gesture.current = null;
+    }
+  };
+
   const onPointerDown = (e: React.PointerEvent) => {
-    if ((e.target as HTMLElement).closest("[data-nopan]")) return;
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    pan.current = { x: e.clientX, y: e.clientY, cx: cam.x, cy: cam.y };
+    const onItem = !!(e.target as HTMLElement).closest("[data-nopan]");
+    // 滑鼠點在卡片上不平移；觸控則整片都能拖，否則手機上卡片佔滿畫面就滑不動
+    if (onItem && e.pointerType !== "touch") return;
+    if (!onItem) {
+      try {
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      } catch {
+        /* 指標已失效時忽略 */
+      }
+    }
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    beginGesture();
   };
   const onPointerMove = (e: React.PointerEvent) => {
     if (dragLane) {
+      if (e.pointerId !== dragLane.pid) return;
       setDragLane({
         ...dragLane,
         x: dragLane.px + (e.clientX - dragLane.sx) / cam.k,
@@ -106,12 +147,29 @@ export function CanvasBoard({ project, h }: { project: RenderProject; h: CanvasH
       });
       return;
     }
-    if (!pan.current) return;
-    setCam((c) => ({ ...c, x: pan.current!.cx + e.clientX - pan.current!.x, y: pan.current!.cy + e.clientY - pan.current!.y }));
+    if (!pointers.current.has(e.pointerId)) return;
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const g = gesture.current;
+    if (!g) return;
+    const pts = Array.from(pointers.current.values());
+    if (g.kind === "pan") {
+      setCam({ ...g.cam, x: g.cam.x + pts[0].x - g.x, y: g.cam.y + pts[0].y - g.y });
+      return;
+    }
+    const el = wrap.current;
+    if (pts.length < 2 || !el) return;
+    const r = el.getBoundingClientRect();
+    const [a, b] = pts;
+    const d = Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
+    const mx = (a.x + b.x) / 2 - r.left;
+    const my = (a.y + b.y) / 2 - r.top;
+    const k = Math.min(2, Math.max(0.2, (g.cam.k * d) / g.d));
+    // 起始中點下的畫布座標，跟著雙指中點移動（同時支援雙指平移）
+    setCam({ k, x: mx - ((g.mx - g.cam.x) * k) / g.cam.k, y: my - ((g.my - g.cam.y) * k) / g.cam.k });
   };
-  const onPointerUp = () => {
-    pan.current = null;
-    if (dragLane) {
+  const onPointerUp = (e: React.PointerEvent) => {
+    if (pointers.current.delete(e.pointerId)) beginGesture(); // 剩下的手指重新起算，避免跳動
+    if (dragLane && e.pointerId === dragLane.pid) {
       const { id, x, y } = dragLane;
       setDragLane(null);
       mutate(project.id, (d) => {
@@ -124,9 +182,15 @@ export function CanvasBoard({ project, h }: { project: RenderProject; h: CanvasH
 
   const startLaneDrag = (id: string, pos: { x: number; y: number }) => (e: React.PointerEvent) => {
     if ((e.target as HTMLElement).closest("button,input,select,textarea")) return;
+    // 觸控時標頭交給畫布平移；排列視角是桌機操作，避免手機一滑就把卡片拖走
+    if (e.pointerType === "touch" || dragLane) return;
     e.stopPropagation();
-    wrap.current?.setPointerCapture(e.pointerId);
-    setDragLane({ id, sx: e.clientX, sy: e.clientY, px: pos.x, py: pos.y, x: pos.x, y: pos.y });
+    try {
+      wrap.current?.setPointerCapture(e.pointerId);
+    } catch {
+      /* 指標已失效時忽略 */
+    }
+    setDragLane({ id, pid: e.pointerId, sx: e.clientX, sy: e.clientY, px: pos.x, py: pos.y, x: pos.x, y: pos.y });
   };
 
   // 主圖 → 衍生的依賴線
@@ -144,7 +208,7 @@ export function CanvasBoard({ project, h }: { project: RenderProject; h: CanvasH
     <div className="absolute inset-0 overflow-hidden bg-[radial-gradient(circle,hsl(var(--border))_1px,transparent_1px)] [background-size:22px_22px]">
       <div
         ref={wrap}
-        className="absolute inset-0 cursor-grab active:cursor-grabbing"
+        className="absolute inset-0 cursor-grab touch-none active:cursor-grabbing"
         onWheel={onWheel}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}

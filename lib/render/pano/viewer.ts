@@ -31,6 +31,7 @@ export class PanoViewer {
   private raf = 0;
   private drag: { x: number; y: number; yaw: number; pitch: number } | null = null;
   private pinch: { d: number; fov: number } | null = null;
+  private down = new Set<number>(); // 雙指縮放時停止旋轉，避免畫面亂跳
   state: ViewState = { yaw: 0, pitch: 0, fov: 75 };
   onChange?: (s: ViewState) => void;
 
@@ -123,18 +124,26 @@ export class PanoViewer {
   }
 
   private onDown = (e: PointerEvent) => {
-    this.canvas.setPointerCapture(e.pointerId);
-    this.drag = { x: e.clientX, y: e.clientY, yaw: this.state.yaw, pitch: this.state.pitch };
+    try {
+      this.canvas.setPointerCapture(e.pointerId);
+    } catch {
+      /* 指標已失效時忽略 */
+    }
+    this.down.add(e.pointerId);
+    this.drag =
+      this.down.size === 1 ? { x: e.clientX, y: e.clientY, yaw: this.state.yaw, pitch: this.state.pitch } : null;
   };
   private onMove = (e: PointerEvent) => {
-    if (!this.drag) return;
+    const d = this.drag;
+    if (!d || this.down.size !== 1) return;
     const k = this.state.fov / Math.max(1, this.canvas.clientHeight);
     this.set({
-      yaw: this.drag.yaw - (e.clientX - this.drag.x) * k,
-      pitch: this.drag.pitch + (e.clientY - this.drag.y) * k,
+      yaw: d.yaw - (e.clientX - d.x) * k,
+      pitch: d.pitch + (e.clientY - d.y) * k,
     });
   };
-  private onUp = () => {
+  private onUp = (e: PointerEvent) => {
+    this.down.delete(e.pointerId);
     this.drag = null;
   };
   private onWheel = (e: WheelEvent) => {
@@ -212,9 +221,10 @@ var img=new Image();img.onload=function(){var m=gl.getParameter(gl.MAX_TEXTURE_S
 tex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tex);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGB,gl.RGB,gl.UNSIGNED_BYTE,src);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);req();};
 img.src='data:image/jpeg;base64,${jpegBase64}';
 var dr=null,pin=null;c.style.touchAction='none';
-c.addEventListener('pointerdown',function(e){c.setPointerCapture(e.pointerId);dr={x:e.clientX,y:e.clientY,yaw:S.yaw,pitch:S.pitch};});
-c.addEventListener('pointermove',function(e){if(!dr)return;var k=S.fov/Math.max(1,c.clientHeight);set({yaw:dr.yaw-(e.clientX-dr.x)*k,pitch:dr.pitch+(e.clientY-dr.y)*k});});
-c.addEventListener('pointerup',function(){dr=null;});c.addEventListener('pointercancel',function(){dr=null;});
+var dn={},nd=0;
+c.addEventListener('pointerdown',function(e){try{c.setPointerCapture(e.pointerId);}catch(_){}if(!dn[e.pointerId]){dn[e.pointerId]=1;nd++;}dr=nd===1?{x:e.clientX,y:e.clientY,yaw:S.yaw,pitch:S.pitch}:null;});
+c.addEventListener('pointermove',function(e){var d=dr;if(!d||nd!==1)return;var k=S.fov/Math.max(1,c.clientHeight);set({yaw:d.yaw-(e.clientX-d.x)*k,pitch:d.pitch+(e.clientY-d.y)*k});});
+function up(e){if(dn[e.pointerId]){delete dn[e.pointerId];nd--;}dr=null;}c.addEventListener('pointerup',up);c.addEventListener('pointercancel',up);
 c.addEventListener('wheel',function(e){e.preventDefault();set({fov:S.fov+e.deltaY*.05});},{passive:false});
 c.addEventListener('touchmove',function(e){if(e.touches.length!==2){pin=null;return;}var d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);if(!pin)pin={d:d,fov:S.fov};else set({fov:pin.fov*pin.d/d});},{passive:true});
 addEventListener('resize',req);req();})();</script></body></html>`;
