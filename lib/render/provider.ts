@@ -61,6 +61,9 @@ export interface ApiGenerateInput {
   mask: Blob | null;
   references: Blob[];
   quality: "medium" | "high";
+  /** 底圖像素尺寸：伺服器據此向支援自訂尺寸的模型要求同尺寸輸出 */
+  width: number;
+  height: number;
 }
 
 export interface ApiGenerateOutput {
@@ -78,6 +81,8 @@ export async function generateViaApi(input: ApiGenerateInput): Promise<ApiGenera
   fd.append("quality", input.quality);
   fd.append("consent", "yes");
   fd.append("base", input.base, "base.jpg");
+  fd.append("width", String(input.width));
+  fd.append("height", String(input.height));
   if (input.mask) fd.append("mask", input.mask, "mask.png");
   input.references.forEach((r, i) => fd.append("reference", r, `ref_${i + 1}.jpg`));
   let res: Response;

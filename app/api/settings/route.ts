@@ -61,6 +61,7 @@ export async function PATCH(req: NextRequest) {
     });
     return NextResponse.json(await publicSettings(user));
   } catch (e) {
+    console.error("[settings] patch failed:", (e as Error).name, (e as Error).message);
     return NextResponse.json({ error: `儲存失敗：${(e as Error).message}` }, { status: 500 });
   }
 }

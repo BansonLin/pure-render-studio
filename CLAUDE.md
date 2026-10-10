@@ -78,6 +78,9 @@ Next.js 14.2（App Router）＋ TypeScript ＋ Tailwind（CSS 變數色票，支
 - **提示詞分段**：IMAGE ROLES / PRESERVE / CHANGES / SCENE CONTRACT / SURFACE / LIGHTING / CONSISTENCY / STYLE / REJECT；有編輯區時場景契約自動關閉。
 - **360 縫合**：投影到 equirect → 用接縫樣本（優先重疊區）做對數域增益校色，增益夾在 0.74–1.35 → 羽化 → 極區補色並標記為「非真實」→ 接縫報告。
 - **公司設定（後台）**：`settings/company.json`（金鑰以 `v1.` 開頭的 AES-GCM 密文＋末四碼、模型、上限、空間預設）與 `usage/YYYY-MM.json`（全公司與每人用量），存在 Vercel Blob（private，`useCache: false` 讀、ETag 樂觀鎖寫）。模型清單由「測試並儲存」呼叫供應商 `/v1/models` 動態載入，不寫死。管理者＝`ADMIN_EMAILS`，未設定時是 `ALLOWED_EMAILS` 第一位。出圖與驗收路由 `maxDuration = 300`。Claude 在伺服器用 `@anthropic-ai/sdk`；Opus 5.5／Sonnet 5.5 等加 `fallbacks: "default"`；結果寫在選填欄位 `qa.aiReview`，只是建議，判定與核准仍由人按。
+- **後台寫入的 ETag**（`lib/server/store.ts`）：樂觀鎖的 ETag 一律取自 `head()`，**不要用 `get()` 回應的 ETag**（格式不同，`put({ ifMatch })` 會一律 412，曾讓第二把金鑰存不進去）。被拒後重讀、ETag 沒變就不帶條件覆寫，最多 5 次。
+- **整張增強 vs 局部修改**：沒有修改區時編譯器自動略過 `keep-outside`（否則等於叫模型整張不准動）；`enh-*` 積木（寫實光影、材質質感、建築攝影成像）預設關閉，由「一鍵：整體渲染增強」加入。有修改區時框外仍回貼 3D 原圖，增強只留在框內。
+- **出圖尺寸**：瀏覽器送 2048 長邊底圖與原圖寬高；`outputSizeFor` 只對 gpt-image-2 指定尺寸（16 的倍數、長邊 ≤3840、總像素 655,360–8,294,400、比例 ≤3:1），其他模型或超出規則回 `auto`。不要送 `input_fidelity` 給 gpt-image-2。
 - **空間與圖號**：新增視角的空間清單來自後台 `rooms`（`DEFAULT_ROOMS` 為預設）；圖號留空時 `suggestViewNumbers` 依起始號找空號，沒起始號接最大號。視角圖號建立後不可改（版本、物件聖經、釘選都以圖號串接）；其他欄位用 `updateView` 改。
 - **表單用選的**：有限選項用 `select`、常見但開放的用 `datalist`、需要兩者時用 `ChoiceInput`（選單＋「其他（自行輸入）」）；選項放 `options.ts`。使用者原文欄位（本輪需求、區域說明）維持自由文字。
 - **跨裝置**：資料不同步，靠「專案備份」JSON 搬移；`importBackup(parsed, { replace })` 先寫新資料、最後才刪舊圖。**不要加 `display: standalone` 的 web manifest**：iOS 主畫面網頁 App 與 Safari 分開存登入與資料，magic link 會開在 Safari，使用者會卡在登入頁（登入改驗證碼後再評估）。

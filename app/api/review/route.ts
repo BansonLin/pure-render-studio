@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
   try {
     await assertUnderCap("claudeReviews", cfg.cap);
     const review = await runReview(cfg, { baseB64, resultB64, brief: brief.slice(0, 20000), checklist: items });
-    await bumpUsage("claudeReviews", user.email).catch(() => {});
+    await bumpUsage("claudeReviews", user.email).catch((e: Error) => console.error("[usage] bump failed:", e.name, e.message));
     return NextResponse.json(review);
   } catch (e) {
     const status = e instanceof CapReachedError ? 429 : 502;
