@@ -39,7 +39,7 @@ import {
   setState,
 } from "@/lib/render/actions";
 import { preflight, shapeBounds, describeArea } from "@/lib/render/compiler";
-import { BLOCK_CATEGORY_LABEL, PROMPT_BLOCKS, type BlockCategory } from "@/lib/render/prompt-blocks";
+import { BLOCK_CATEGORY_LABEL, ENHANCE_BLOCK_IDS, PROMPT_BLOCKS, type BlockCategory } from "@/lib/render/prompt-blocks";
 import { fetchLiveStatus, PROVIDER_CAPS, type LiveStatus } from "@/lib/render/provider";
 import { rememberApprover, useDeviceSettings } from "@/lib/render/settings";
 import { useCompany } from "@/lib/render/company";
@@ -537,6 +537,27 @@ function PromptTab({
       </Section>
 
       <Section title="提示詞積木" hint="全圖套用；選區積木請在標註卡片內勾">
+        {editable && (
+          <div className="space-y-1.5 rounded-lg border border-border bg-muted/40 p-2.5">
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full"
+              onClick={() =>
+                patch((x) => {
+                  x.blockIds = Array.from(new Set([...x.blockIds, ...ENHANCE_BLOCK_IDS]));
+                })
+              }
+            >
+              <Sparkles /> 一鍵：整體渲染增強
+            </Button>
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              {v.regions.some((r) => r.kind !== "lock")
+                ? "目前有框選修改區：框外最後會還原成 3D 原圖，增強只會留在框內。要整張變寫實，請先刪掉修改區。"
+                : "不框選、整張提升光影、材質與攝影質感，設計內容（家具、顏色、擺設）不變。"}
+            </p>
+          </div>
+        )}
         <div className="space-y-2.5">
           {categories.map((cat) => (
             <div key={cat}>

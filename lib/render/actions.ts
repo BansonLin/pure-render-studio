@@ -326,8 +326,10 @@ export async function runApiGeneration(projectId: string, versionId: string, opt
     bmp.close();
     return canvasToBlob(c, "image/jpeg", 0.9);
   };
-  const baseJ = await toJpeg(base, 1536);
+  // 送原寬（渲染圖多為 2048）：新模型可直接輸出同尺寸，不必先縮小再放大而損失細節
+  const baseJ = await toJpeg(base, 2048);
   const bmp = await decodeImage(baseJ);
+  const dims = { width: bmp.width, height: bmp.height };
   const mask = v.regions.some((r) => r.kind !== "lock") ? await maskPng(v.regions, bmp.width, bmp.height) : null;
   bmp.close();
   const refs: Blob[] = [];
@@ -345,7 +347,7 @@ export async function runApiGeneration(projectId: string, versionId: string, opt
     x.events.push({ at: now(), type: "api_submitted", detail: requestId });
   });
   try {
-    const out = await generateViaApi({ requestId, prompt, base: baseJ, mask, references: refs, quality: opts.quality });
+    const out = await generateViaApi({ requestId, prompt, base: baseJ, mask, references: refs, quality: opts.quality, ...dims });
     await patchVersion(projectId, versionId, (x) => {
       x.events.push({ at: now(), type: "api_returned", detail: `model=${out.model ?? "unknown"}` });
     });

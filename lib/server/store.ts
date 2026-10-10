@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { BlobPreconditionFailedError, get, put } from "@vercel/blob";
+import { BlobPreconditionFailedError, get, head, put } from "@vercel/blob";
 
 /**
  * 後台小型 JSON 儲存。
@@ -23,13 +23,17 @@ interface Read<T> {
 async function readRaw(key: string): Promise<{ text: string; etag: string | null } | null> {
   const mode = storeMode();
   if (mode === "blob") {
-    // 設定剛存完就要讀到新值，略過 CDN 快取
-    const r = await get(key, { access: "private", useCache: false }).catch((e: Error) => {
+    // 版本號取自 head()：那是寫入時 ifMatch 要比對的值。get() 回的是下載回應的 HTTP ETag，
+    // JSON 經壓縮後可能變成弱 ETag（W/"…"），拿去比對會永遠不符，第二次寫入就失敗。
+    const meta = await head(key).catch((e: Error) => {
       if (e.name === "BlobNotFoundError") return null;
       throw e;
     });
+    if (!meta) return null;
+    // 設定剛存完就要讀到新值，略過 CDN 快取
+    const r = await get(key, { access: "private", useCache: false });
     if (!r || r.statusCode !== 200) return null;
-    return { text: await new Response(r.stream).text(), etag: r.blob.etag };
+    return { text: await new Response(r.stream).text(), etag: meta.etag };
   }
   if (mode === "file") {
     try {
@@ -73,14 +77,20 @@ export async function readJson<T>(key: string, fallback: T): Promise<Read<T>> {
 
 /** 讀→改→寫；寫入時若別人先改過（ETag 不符）就重讀再套一次 */
 export async function updateJson<T>(key: string, fallback: T, fn: (v: T) => T): Promise<T> {
+  let rejectedEtag: string | null = null;
   for (let attempt = 0; attempt < 5; attempt++) {
     const cur = await readJson(key, fallback);
     const next = fn(structuredClone(cur.value));
+    // 同一個版本號連續被拒：期間沒人改過資料，是比對值本身對不上；改為直接覆寫，避免設定永遠存不進去
+    const etag = cur.etag && cur.etag === rejectedEtag ? null : cur.etag;
     try {
-      await writeRaw(key, JSON.stringify(next), cur.etag);
+      await writeRaw(key, JSON.stringify(next), etag);
       return next;
     } catch (e) {
-      if (e instanceof BlobPreconditionFailedError) continue;
+      if (e instanceof BlobPreconditionFailedError) {
+        rejectedEtag = cur.etag;
+        continue;
+      }
       throw e;
     }
   }
