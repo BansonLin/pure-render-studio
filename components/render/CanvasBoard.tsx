@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Crown, ImagePlus, Maximize2, Plus, ZoomIn, ZoomOut } from "lucide-react";
+import { Crown, ImagePlus, Maximize2, Pencil, Plus, ZoomIn, ZoomOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRenderStore } from "@/store/render-store";
 import { addProjectReference, setOriginal } from "@/lib/render/actions";
@@ -20,6 +20,7 @@ export interface CanvasHandlers {
   onNewVersion: (viewId: string) => void;
   onOpenOriginal: (viewId: string) => void;
   onAddView: () => void;
+  onEditView: (viewId: string) => void;
   onError: (msg: string) => void;
 }
 
@@ -348,7 +349,7 @@ export function CanvasBoard({ project, h }: { project: RenderProject; h: CanvasH
         </button>
         <span className="mx-1 h-5 w-px bg-border" />
         <button className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs hover:bg-accent" onClick={h.onAddView}>
-          <Plus className="h-3.5 w-3.5" /> 新增視角
+          <Plus className="h-3.5 w-3.5" /> 新增視角／插入圖片
         </button>
       </div>
       <p className="pointer-events-none absolute bottom-3 right-3 hidden rounded-md bg-card/80 px-2 py-1 text-[10px] text-muted-foreground sm:block">
@@ -411,7 +412,16 @@ function ViewLane({
         <div className="w-[200px] shrink-0 cursor-move rounded-xl border border-border bg-card p-3 shadow-sm" onPointerDown={onDragStart}>
           <div className="flex items-center gap-2">
             <span className="rounded-md bg-foreground px-1.5 py-0.5 font-mono text-xs font-bold text-background">{view.id}</span>
-            <span className="truncate text-sm font-semibold">{view.name}</span>
+            <span className="min-w-0 flex-1 truncate text-sm font-semibold">{view.name}</span>
+            <button
+              aria-label={`編輯視角 ${view.id}`}
+              title="編輯名稱、空間、主圖關係"
+              className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => h.onEditView(view.id)}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
           </div>
           <div className="mt-2 flex flex-wrap gap-1">
             <Pill tone={view.role === "master" ? "ok" : "muted"}>{view.role === "master" ? "主圖" : view.role === "derived" ? "衍生" : "獨立"}</Pill>

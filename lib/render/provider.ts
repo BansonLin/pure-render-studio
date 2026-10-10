@@ -1,13 +1,15 @@
 "use client";
 
 import { base64ToBlob } from "./image";
+export type { ModelOption } from "./company-types";
 
 /**
  * 影像供應商轉接層。
  *
  * - manual：ChatGPT 手動模式（零 API 成本）。匯出任務包 → 設計師在 ChatGPT 上傳＋貼提示詞
  *   → 下載結果 → 匯回。網頁版不能上傳遮罩，所以靠「座標描述＋匯回後選區外回貼」控制範圍。
- * - openai：伺服器端呼叫 OpenAI Images Edit API（需管理員設定金鑰並開啟 RENDER_LIVE=1）。
+ * - openai：OpenAI Images Edit API，一律經伺服器路由；金鑰在後台（管理者於「設定」輸入，加密保存），
+ *   瀏覽器拿不到金鑰。
  *
  * 能力不支援就明說，不靜默丟棄限制。
  */
@@ -29,7 +31,7 @@ export const PROVIDER_CAPS: Record<ProviderId, ProviderCaps> = {
     note: "無遮罩：以座標描述選區，匯回後系統回貼選區外像素。",
   },
   openai: {
-    label: "OpenAI API（伺服器）",
+    label: "OpenAI API",
     mask: true,
     maxReferences: 4,
     note: "支援遮罩與多參考圖；每次 1 張、不自動重試、會計費。",

@@ -13,6 +13,7 @@ import { buildViewerHtml, PanoViewer } from "@/lib/render/pano/viewer";
 import { buildZip, blobEntry } from "@/lib/render/zip";
 import type { Panorama, PanoMode, RenderProject } from "@/lib/render/types";
 import { FileButton, inputCls, Pill, Segmented, useBusy, useToast } from "./primitives";
+import { HFOV_OPTIONS } from "@/lib/render/options";
 
 const MODE_LABEL: Record<PanoMode, string> = {
   ring4: "4 張水平環景",
@@ -145,14 +146,17 @@ function PanoEditor({ project, pano, toast }: { project: RenderProject; pano: Pa
           {pano.mode !== "equirect" && (
             <label className="flex items-center gap-2 text-xs">
               來源水平視角（度）
-              <input
-                type="number"
-                min={40}
-                max={140}
-                className="w-20 rounded border border-border bg-card px-2 py-1"
+              <select
+                className="w-24 rounded border border-border bg-card px-2 py-1"
                 value={pano.hfov}
                 onChange={(e) => upd((p) => void (p.hfov = Number(e.target.value) || 90))}
-              />
+              >
+                {Array.from(new Set([...HFOV_OPTIONS, pano.hfov])).sort((a, b) => a - b).map((d) => (
+                  <option key={d} value={d}>
+                    {d}°{d === 90 ? "（4 張環景）" : ""}
+                  </option>
+                ))}
+              </select>
               <span className="text-[11px] text-muted-foreground">需與 3D 軟體相機設定一致</span>
             </label>
           )}
@@ -428,13 +432,18 @@ function FaceSlot({
       <div className="flex items-center gap-1 text-[10px]">
         <span className="font-medium">{label}</span>
         {editableAngles && (
-          <input
-            type="number"
-            className="ml-auto w-14 rounded border border-border bg-card px-1"
+          <select
+            className="ml-auto w-16 rounded border border-border bg-card px-1"
             value={yaw}
             onChange={(e) => onYaw(Number(e.target.value))}
             aria-label="水平角度"
-          />
+          >
+            {Array.from(new Set([...Array.from({ length: 24 }, (_, k) => k * 15), yaw])).sort((a, b) => a - b).map((d) => (
+              <option key={d} value={d}>
+                {d}°
+              </option>
+            ))}
+          </select>
         )}
         {pitch !== 0 && (
           <select className="ml-auto rounded border border-border bg-card px-1" value={roll} onChange={(e) => onRoll(Number(e.target.value))} aria-label="旋轉校正">

@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useRenderStore } from "@/store/render-store";
 import { importBackup, readBackup } from "@/lib/render/actions";
-import { AssetImg, FileButton, inputCls, Modal, Pill, useBusy, useToast } from "./primitives";
+import { AssetImg, ChoiceInput, FileButton, inputCls, Modal, Pill, useBusy, useToast } from "./primitives";
+import { FLOOR_OPTIONS } from "@/lib/render/options";
 import { RenderBoot } from "./RenderBoot";
 
 export function ProjectList() {
@@ -174,10 +175,16 @@ function ProjectListInner() {
             專案名稱
             <input className={inputCls} value={fields.name} onChange={(e) => setFields({ ...fields, name: e.target.value })} placeholder="例：宜蘭游公館 2F" />
           </label>
-          <label className="block space-y-1 text-xs font-medium">
+          <div className="block space-y-1 text-xs font-medium">
             樓層／範圍
-            <input className={inputCls} value={fields.floor} onChange={(e) => setFields({ ...fields, floor: e.target.value })} placeholder="例：2F" />
-          </label>
+            <ChoiceInput
+              value={fields.floor}
+              onChange={(floor) => setFields({ ...fields, floor })}
+              options={FLOOR_OPTIONS}
+              emptyLabel="請選擇"
+              placeholder="例：3F 局部"
+            />
+          </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="ghost" onClick={() => setOpenNew(false)}>
               取消

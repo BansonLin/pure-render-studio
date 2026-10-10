@@ -99,3 +99,17 @@ export async function verifySessionToken(
 }
 
 export const SESSION_MAX_AGE_SECONDS = SESSION_DAYS * 24 * 60 * 60;
+
+/**
+ * 管理者（可改後台金鑰與公司設定）。ADMIN_EMAILS 未設定時只有白名單第一位，
+ * 避免新加入的設計師預設就能換掉公司金鑰。
+ */
+export function isAdminEmail(email: string): boolean {
+  const e = email.trim().toLowerCase();
+  const admins = (process.env.ADMIN_EMAILS ?? "")
+    .split(",")
+    .map((x) => x.trim().toLowerCase())
+    .filter(Boolean);
+  if (admins.length) return admins.includes(e);
+  return allowedEmails()[0] === e;
+}

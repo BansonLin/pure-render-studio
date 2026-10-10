@@ -57,6 +57,25 @@ export async function addView(projectId: string, fields: { id: string; name: str
   });
 }
 
+/**
+ * 修改視角的名稱、空間、角色與依賴主圖。編號不開放改：版本、物件聖經、釘選紀錄都以編號串接。
+ * 主圖關係改動只影響之後新開的版本；已送出的版本仍保留當時釘選的主圖。
+ */
+export async function updateView(
+  projectId: string,
+  viewId: string,
+  fields: { name: string; room: string; role: "master" | "derived" | "standalone"; dependsOn: string[] },
+) {
+  await store().mutate(projectId, (d) => {
+    const v = d.views.find((x) => x.id === viewId);
+    if (!v) return;
+    v.name = fields.name.trim() || v.name;
+    v.room = fields.room.trim();
+    v.role = fields.role;
+    v.dependsOn = fields.role === "derived" ? fields.dependsOn.filter((id) => id !== viewId && d.views.some((x) => x.id === id)) : [];
+  });
+}
+
 export async function addProjectReference(projectId: string, file: File) {
   const meta = await addAssetFromFile(projectId, file, "reference", file.name);
   await store().mutate(projectId, (d) => {

@@ -172,6 +172,55 @@ export function Segmented<T extends string>({
   );
 }
 
+/**
+ * 下拉選單＋「其他（自行輸入）」。選項涵蓋常見情況，少見的仍可自己打，
+ * 既有資料不在選項裡時自動切到自行輸入，不會被清掉。
+ */
+export function ChoiceInput({
+  value,
+  onChange,
+  options,
+  emptyLabel,
+  placeholder,
+  className,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+  emptyLabel?: string;
+  placeholder?: string;
+  className?: string;
+}) {
+  const [customFlag, setCustomFlag] = React.useState(false);
+  const custom = customFlag || (!!value && !options.includes(value));
+  return (
+    <div className={cn("flex gap-1.5", className)}>
+      <select
+        className={inputCls}
+        value={custom ? "__custom" : value}
+        onChange={(e) => {
+          if (e.target.value === "__custom") {
+            setCustomFlag(true);
+            onChange("");
+          } else {
+            setCustomFlag(false);
+            onChange(e.target.value);
+          }
+        }}
+      >
+        {emptyLabel !== undefined && <option value="">{emptyLabel}</option>}
+        {options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+        <option value="__custom">其他（自行輸入）</option>
+      </select>
+      {custom && <input className={inputCls} autoFocus value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />}
+    </div>
+  );
+}
+
 export const inputCls =
   "w-full rounded-md border border-input bg-card px-2.5 py-1.5 text-sm outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30";
 
