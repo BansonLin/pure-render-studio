@@ -1,14 +1,15 @@
 "use client";
 
 import { base64ToBlob } from "./image";
+export type { ModelOption } from "./company-types";
 
 /**
  * 影像供應商轉接層。
  *
  * - manual：ChatGPT 手動模式（零 API 成本）。匯出任務包 → 設計師在 ChatGPT 上傳＋貼提示詞
  *   → 下載結果 → 匯回。網頁版不能上傳遮罩，所以靠「座標描述＋匯回後選區外回貼」控制範圍。
- * - openai：OpenAI Images Edit API。本裝置在「設定」存了金鑰就由瀏覽器直接呼叫（不受伺服器
- *   60 秒、4 MB 限制，金鑰也不經過璞石伺服器）；否則走伺服器路由（需 RENDER_LIVE=1）。
+ * - openai：OpenAI Images Edit API，一律經伺服器路由；金鑰在後台（管理者於「設定」輸入，加密保存），
+ *   瀏覽器拿不到金鑰。
  *
  * 能力不支援就明說，不靜默丟棄限制。
  */
@@ -105,79 +106,4 @@ export async function generateViaApi(input: ApiGenerateInput): Promise<ApiGenera
     model: json.model ?? null,
     usage: json.usage ?? null,
   };
-}
-
-// ---- 瀏覽器直連 OpenAI（金鑰來自本裝置設定） ----
-
-const OPENAI = "https://api.openai.com/v1";
-
-export interface ModelOption {
-  id: string;
-  label: string;
-  note?: string;
-  recommended?: boolean;
-}
-
-/** 已知影像模型的排序與說明；清單以外的模型照字母排在後面 */
-const OPENAI_IMAGE_HINTS: Record<string, { rank: number; note: string }> = {
-  "gpt-image-2": { rank: 0, note: "最新旗艦，品質最好" },
-  "gpt-image-1.5": { rank: 1, note: "上一代，較便宜" },
-  "gpt-image-1-mini": { rank: 2, note: "最便宜，細節較弱" },
-  "gpt-image-1": { rank: 3, note: "舊版，據報即將退役" },
-};
-
-async function openaiError(res: Response): Promise<string> {
-  const j = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
-  const msg = j.error?.message ?? "";
-  if (res.status === 401) return "OpenAI 金鑰無效或已被撤銷。";
-  if (res.status === 403 && /verif/i.test(msg)) return "OpenAI 要求先完成「組織驗證」才能用影像模型：OpenAI 後台 → Settings → Organization → Verify。";
-  if (res.status === 429) return "OpenAI 額度不足或請求太頻繁（請檢查帳戶餘額與用量上限）。";
-  return `OpenAI 回應錯誤（${res.status}）：${msg || "未知"}`;
-}
-
-export async function listOpenAIImageModels(key: string): Promise<ModelOption[]> {
-  let res: Response;
-  try {
-    res = await fetch(`${OPENAI}/models`, { headers: { Authorization: `Bearer ${key}` } });
-  } catch {
-    throw new Error("瀏覽器連不到 OpenAI（網路問題，或 OpenAI 拒絕瀏覽器直連；後者請改用伺服器共用金鑰，見設定說明）。");
-  }
-  if (!res.ok) throw new Error(await openaiError(res));
-  const j = (await res.json()) as { data?: { id: string }[] };
-  const ids = (j.data ?? []).map((m) => m.id).filter((id) => /^(gpt-image|chatgpt-image)/.test(id));
-  if (!ids.length) throw new Error("這把金鑰看不到任何影像模型（帳戶可能尚未開通或未完成組織驗證）。");
-  const rank = (id: string) => OPENAI_IMAGE_HINTS[id]?.rank ?? 99;
-  ids.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
-  return ids.map((id, i) => ({ id, label: id, note: OPENAI_IMAGE_HINTS[id]?.note, recommended: i === 0 }));
-}
-
-/**
- * 瀏覽器直接呼叫 OpenAI 影像編輯。與伺服器路由同樣的防線：每次 1 張、不自動重試；
- * 連線在送出後中斷時無法得知是否已計費，一律標成「結果未知」讓使用者去後台確認。
- */
-export async function generateViaOpenAIDirect(
-  input: ApiGenerateInput,
-  cfg: { key: string; model: string },
-): Promise<ApiGenerateOutput> {
-  const fd = new FormData();
-  fd.append("model", cfg.model);
-  fd.append("prompt", input.prompt);
-  fd.append("n", "1");
-  fd.append("size", "auto");
-  fd.append("quality", input.quality);
-  fd.append("output_format", "jpeg");
-  fd.append("image[]", input.base, "image_1.jpg");
-  input.references.forEach((r, i) => fd.append("image[]", r, `image_${i + 2}.jpg`));
-  if (input.mask) fd.append("mask", input.mask, "mask.png");
-  let res: Response;
-  try {
-    res = await fetch(`${OPENAI}/images/edits`, { method: "POST", headers: { Authorization: `Bearer ${cfg.key}` }, body: fd });
-  } catch {
-    throw new OutcomeUnknownError("連線中斷，無法確認 OpenAI 是否已產生結果。");
-  }
-  if (!res.ok) throw new Error(await openaiError(res));
-  const j = (await res.json().catch(() => ({}))) as { data?: { b64_json?: string }[]; usage?: unknown };
-  const b64 = j.data?.[0]?.b64_json;
-  if (!b64) throw new OutcomeUnknownError("OpenAI 回應沒有影像；請到 OpenAI 後台確認是否已計費。");
-  return { image: base64ToBlob(b64, "image/jpeg"), model: cfg.model, usage: j.usage ?? null };
 }

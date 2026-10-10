@@ -42,9 +42,9 @@ Safari → 分享 → 加入主畫面 → **把「以網頁 App 開啟」（Open
 3. ChatGPT 出圖後長按 →「儲存影像」或分享到「檔案」。
 4. 回工作台「匯入 AI 結果」選那張圖；系統自動放大、對位、回貼、篩查水波紋。
 
-## 6. AI 金鑰（每台裝置各設一次）
+## 6. AI 金鑰（後台設定一次，所有裝置共用）
 
-右上角齒輪「設定」填 OpenAI／Claude 金鑰後，平板上也能直接出圖、讓 Claude 驗收，不必在 ChatGPT App 之間往返。金鑰只存在該裝置，電腦設過的 iPad 不會自動有。詳見 `docs/SETTINGS-GUIDE.md`。
+管理者在右上角齒輪「設定」輸入 OpenAI／Claude 金鑰一次，電腦、iPad、手機與同事都能直接出圖、讓 Claude 驗收，不必在 ChatGPT App 之間往返。詳見 `docs/SETTINGS-GUIDE.md`。
 
 ## 7. 已知限制
 

@@ -6,7 +6,7 @@ export const metadata = { title: "設定" };
 export default function SettingsPage() {
   return (
     <>
-      <StudioHeader description="API 金鑰與模型（只存在這台裝置）" />
+      <StudioHeader description="API 金鑰、模型、空間與圖號預設（存在後台）" />
       <SettingsPanel />
     </>
   );

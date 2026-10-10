@@ -6,15 +6,15 @@ import { ArrowLeft, Box, Globe, LayoutGrid, Package } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useRenderProject, useRenderStore } from "@/store/render-store";
-import { addView, createDraft } from "@/lib/render/actions";
-import type { ViewRole } from "@/lib/render/types";
+import { addView, createDraft, setOriginal as setOriginalImage, updateView } from "@/lib/render/actions";
 import { CanvasBoard } from "./CanvasBoard";
 import { VersionEditor } from "./VersionEditor";
 import { ScenePanel } from "./ScenePanel";
 import { PanoPanel } from "./PanoPanel";
 import { DeliveryPanel } from "./DeliveryPanel";
-import { AssetImg, ChoiceInput, inputCls, Modal, Pill, useBusy, useToast } from "./primitives";
-import { ROOM_OPTIONS, SHOT_OPTIONS, STYLE_PRESETS } from "@/lib/render/options";
+import { AssetImg, Modal, Pill, useBusy, useToast } from "./primitives";
+import { STYLE_PRESETS } from "@/lib/render/options";
+import { ViewDialog } from "./ViewDialog";
 import { RenderBoot } from "./RenderBoot";
 
 type WsTab = "canvas" | "scene" | "pano" | "delivery";
@@ -37,8 +37,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
   const [editing, setEditing] = React.useState<string | null>(null);
   const [original, setOriginal] = React.useState<string | null>(null);
   const [newView, setNewView] = React.useState(false);
-  const [nv, setNv] = React.useState({ id: "", name: "", room: "", role: "standalone" as ViewRole, dependsOn: [] as string[] });
-  const [shot, setShot] = React.useState("");
+  const [editView, setEditView] = React.useState<string | null>(null);
 
   if (!project) {
     return (
@@ -125,13 +124,8 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
                 onOpenVersion: setEditing,
                 onNewVersion: newVersion,
                 onOpenOriginal: setOriginal,
-                onAddView: () => {
-                  // 編號預設接在現有最大號之後，多數情況直接按新增即可
-                  const nums = project.views.map((v) => Number(v.id)).filter((n) => Number.isFinite(n));
-                  setNv({ id: nums.length ? String(Math.max(...nums) + 1) : "1", name: "", room: "", role: "standalone", dependsOn: [] });
-                  setShot("");
-                  setNewView(true);
-                },
+                onAddView: () => setNewView(true),
+                onEditView: setEditView,
                 onError: toast.bad,
               }}
             />
@@ -178,99 +172,30 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
         )}
       </Modal>
 
-      <Modal open={newView} onClose={() => setNewView(false)} title="新增視角">
-        <form
-          className="space-y-3 p-5"
-          onSubmit={(e) => {
-            e.preventDefault();
-            run("view", async () => {
-              await addView(project.id, nv);
-              setNewView(false);
-              setNv({ id: "", name: "", room: "", role: "standalone", dependsOn: [] });
-              setShot("");
-            });
-          }}
-        >
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1 text-xs font-medium">
-              空間
-              <ChoiceInput
-                value={nv.room}
-                onChange={(room) => setNv({ ...nv, room, name: !nv.name || nv.name === `${nv.room}${shot}` ? `${room}${shot}` : nv.name })}
-                options={ROOM_OPTIONS}
-                emptyLabel="請選擇"
-                placeholder="例：視聽室"
-              />
-            </div>
-            <label className="space-y-1 text-xs font-medium">
-              景別
-              <select
-                className={inputCls}
-                value={shot}
-                onChange={(e) => {
-                  const next = e.target.value;
-                  setShot(next);
-                  if (!nv.name || nv.name === `${nv.room}${shot}`) setNv({ ...nv, name: `${nv.room}${next}` });
-                }}
-              >
-                <option value="">請選擇</option>
-                {SHOT_OPTIONS.map((o) => (
-                  <option key={o} value={o}>
-                    {o}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            <label className="space-y-1 text-xs font-medium">
-              編號
-              <input className={inputCls} inputMode="numeric" value={nv.id} onChange={(e) => setNv({ ...nv, id: e.target.value.trim() })} placeholder="21" />
-            </label>
-            <label className="col-span-2 space-y-1 text-xs font-medium">
-              名稱（自動帶入，可改）
-              <input className={inputCls} value={nv.name} onChange={(e) => setNv({ ...nv, name: e.target.value })} placeholder="餐廚正景" />
-            </label>
-          </div>
-          <label className="block space-y-1 text-xs font-medium">
-            角色
-            <select className={inputCls} value={nv.role} onChange={(e) => setNv({ ...nv, role: e.target.value as ViewRole, dependsOn: e.target.value === "derived" ? nv.dependsOn : [] })}>
-              <option value="master">主圖（定義該空間的設計）</option>
-              <option value="derived">衍生（讀取主圖的物件與材質）</option>
-              <option value="standalone">獨立</option>
-            </select>
-          </label>
-          {nv.role === "derived" && (
-            <div className="space-y-1 text-xs font-medium">
-              依賴的主圖
-              <div className="flex flex-wrap gap-2">
-                {project.views
-                  .filter((v) => v.role === "master")
-                  .map((m) => (
-                    <label key={m.id} className="inline-flex items-center gap-1 font-normal">
-                      <input
-                        type="checkbox"
-                        checked={nv.dependsOn.includes(m.id)}
-                        onChange={(e) =>
-                          setNv({ ...nv, dependsOn: e.target.checked ? [...nv.dependsOn, m.id] : nv.dependsOn.filter((x) => x !== m.id) })
-                        }
-                      />
-                      {m.id} {m.name}
-                    </label>
-                  ))}
-              </div>
-            </div>
-          )}
-          <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="ghost" onClick={() => setNewView(false)}>
-              取消
-            </Button>
-            <Button type="submit" disabled={!!busy}>
-              新增
-            </Button>
-          </div>
-        </form>
-      </Modal>
+      <ViewDialog
+        project={project}
+        editId={editView}
+        open={newView || !!editView}
+        busy={!!busy}
+        onClose={() => {
+          setNewView(false);
+          setEditView(null);
+        }}
+        onSubmit={(fields, file) =>
+          run("view", async () => {
+            if (editView) {
+              await updateView(project.id, editView, fields);
+              setEditView(null);
+              toast.ok(`已更新視角 ${fields.id}`);
+              return;
+            }
+            await addView(project.id, fields);
+            if (file) await setOriginalImage(project.id, fields.id, file);
+            setNewView(false);
+            toast.ok(`已新增視角 ${fields.id}${file ? "並放入原圖" : ""}`);
+          })
+        }
+      />
     </div>
   );
 }

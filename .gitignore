@@ -37,3 +37,6 @@ next-env.d.ts
 
 # generated screenshots
 /scripts/screenshots/
+
+# 本機後台設定（SETTINGS_STORE_DIR）
+/.data

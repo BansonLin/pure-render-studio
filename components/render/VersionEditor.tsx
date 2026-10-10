@@ -41,7 +41,8 @@ import {
 import { preflight, shapeBounds, describeArea } from "@/lib/render/compiler";
 import { BLOCK_CATEGORY_LABEL, PROMPT_BLOCKS, type BlockCategory } from "@/lib/render/prompt-blocks";
 import { fetchLiveStatus, PROVIDER_CAPS, type LiveStatus } from "@/lib/render/provider";
-import { rememberApprover, useDeviceSettings, useDeviceUsage } from "@/lib/render/settings";
+import { rememberApprover, useDeviceSettings } from "@/lib/render/settings";
+import { useCompany } from "@/lib/render/company";
 import { estimateCost, runClaudeReview } from "@/lib/render/claude";
 import { REFERENCE_ROLE_LABEL } from "@/lib/render/types";
 import type { BaseStrategy, QaVerdict, ReferenceRole, Region, RenderProject, Version } from "@/lib/render/types";
@@ -829,15 +830,23 @@ function RunTab({
   onMarkFailed: () => void;
   onReopen: () => void;
 }) {
-  const device = useDeviceSettings();
-  const usage = useDeviceUsage();
-  const deviceReady = !!(device.openai.key && device.openai.model);
-  // 有設定金鑰就預設走 API，省掉 ChatGPT 往返；沒有就維持手動
-  const [provider, setProvider] = React.useState<"manual" | "openai">(deviceReady ? "openai" : "manual");
+  const { data: company } = useCompany();
+  const apiReady = !!company?.openai.configured || !!live?.live;
+  // 後台有金鑰就預設走 API，省掉 ChatGPT 往返；沒有就維持手動
+  const [provider, setProviderState] = React.useState<"manual" | "openai">(apiReady ? "openai" : "manual");
+  const touched = React.useRef(false);
+  const setProvider = (p: "manual" | "openai") => {
+    touched.current = true;
+    setProviderState(p);
+  };
+  // 後台設定晚一步載入時，使用者還沒自己選過才切到 API
+  React.useEffect(() => {
+    if (apiReady && !touched.current) setProviderState("openai");
+  }, [apiReady]);
   const [consent, setConsent] = React.useState(false);
-  const [quality, setQuality] = React.useState<"medium" | "high">(device.openai.quality);
-  const capLeft = device.openai.monthlyCap === null ? null : device.openai.monthlyCap - usage.openaiImages;
-  const apiReady = deviceReady || !!live?.live;
+  const [quality, setQuality] = React.useState<"medium" | "high">(company?.openai.extra.quality ?? "high");
+  const cap = company?.openai.monthlyCap ?? null;
+  const capLeft = cap === null || !company ? null : cap - company.usage.openaiImages;
   const blocked = risks.some((r) => r.level === "error");
   const fileRef = React.useRef<HTMLInputElement>(null);
   const hasRegions = v.regions.some((r) => r.kind !== "lock");
@@ -888,17 +897,17 @@ function RunTab({
         <Section title="API 生成">
           {!apiReady ? (
             <p className="rounded-md bg-muted px-3 py-2 text-[11px] text-muted-foreground">
-              還沒有可用的 OpenAI 金鑰。到右上角
+              還沒有可用的 OpenAI 金鑰。請管理者到右上角
               <Link href="/settings" className="mx-1 font-medium text-foreground underline">
                 設定
               </Link>
-              填入金鑰即可直接出圖。
+              輸入一次，全公司都能直接出圖。
             </p>
           ) : (
             <>
               <p className="text-[11px] text-muted-foreground">
-                模型：{deviceReady ? `${device.openai.model}（本裝置設定）` : `${live?.model}（伺服器共用金鑰）`}
-                {capLeft !== null && `｜本月本裝置剩 ${Math.max(0, capLeft)} 張`}
+                模型：{company?.openai.model || live?.model}（後台設定）
+                {capLeft !== null && `｜本月全公司剩 ${Math.max(0, capLeft)} 張`}
               </p>
               <Segmented<"medium" | "high">
                 value={quality}
@@ -1011,6 +1020,7 @@ function QaTab({
   onClaude: () => void;
 }) {
   const device = useDeviceSettings();
+  const { data: company } = useCompany();
   const [by, setBy] = React.useState(device.approvers[0] ?? "");
   const [note, setNote] = React.useState("");
   const rawUrl = useAssetUrl(v.rawResultAssetId);
@@ -1073,7 +1083,7 @@ function QaTab({
         </Section>
       )}
 
-      <ClaudeSection v={v} busy={busy} claudeReady={!!(device.claude.key && device.claude.model)} model={device.claude.model} onRun={onClaude} onAdoptAll={() =>
+      <ClaudeSection v={v} busy={busy} claudeReady={!!company?.claude.configured} model={company?.claude.model ?? ""} onRun={onClaude} onAdoptAll={() =>
         patch((x) => {
           for (const s of x.qa?.aiReview?.checks ?? []) {
             const c = x.qa!.checks.find((cc) => cc.id === s.id);
@@ -1332,11 +1342,11 @@ function ClaudeSection({
     <Section title="Claude 看圖驗收" hint="建議，最後仍由人判定">
       {!claudeReady ? (
         <p className="rounded-md bg-muted px-3 py-2 text-[11px] text-muted-foreground">
-          到右上角
+          請管理者到右上角
           <Link href="/settings" className="mx-1 font-medium text-foreground underline">
             設定
           </Link>
-          填入 Claude 金鑰，就能讓 Claude 對照底圖逐項檢查。
+          輸入 Claude 金鑰，全公司都能讓 Claude 對照底圖逐項檢查。
         </p>
       ) : (
         <>
