@@ -19,7 +19,7 @@ export type BlockCategory =
 
 export const BLOCK_CATEGORY_LABEL: Record<BlockCategory, string> = {
   preserve: "保留鎖定",
-  surface: "素面材質（去紋）",
+  surface: "材質",
   lighting: "光線",
   consistency: "跨視角一致",
   style: "風格",
@@ -75,6 +75,17 @@ export const PROMPT_BLOCKS: PromptBlock[] = [
     text: "Change ONLY the marked regions. Everything outside them must remain identical to image 1 — same pixels, colors, light and texture.",
     defaultOn: true,
     regional: false,
+  },
+
+  // ---- 材質 ----
+  {
+    id: "enh-material",
+    category: "surface",
+    label: "材質質感提升",
+    hint: "整體渲染增強用：保留原本的顏色與材質種類，只把反射、粗糙度、布面光澤做到照片等級；素面不加紋路。",
+    text: "Upgrade every existing material to photographic quality WITHOUT changing its color or material type: believable roughness and reflections on stone, metal, glass and lacquer, soft sheen on fabric, real wood grain only where image 1 already shows wood, crisp edges and small bevels. Plain surfaces stay plain: add no new pattern, texture or veining.",
+    defaultOn: false,
+    regional: true,
   },
 
   // ---- 素面材質（去水波紋）----
@@ -153,6 +164,15 @@ export const PROMPT_BLOCKS: PromptBlock[] = [
 
   // ---- 光線 ----
   {
+    id: "enh-light",
+    category: "lighting",
+    label: "寫實光影（全域光）",
+    hint: "整體渲染增強用：柔和全域光、家具下的接觸陰影、角落自然暗部；不新增、不移動光源。",
+    text: "Re-light for photographic realism with the SAME light sources and directions as image 1: physically plausible global illumination, soft contact shadows under every piece of furniture, gentle ambient occlusion in corners and joints, natural light falloff across walls and ceiling, subtle bounce light and color bleeding. Never add, remove or move a light source.",
+    defaultOn: false,
+    regional: false,
+  },
+  {
     id: "light-daylight",
     category: "lighting",
     label: "自然窗光",
@@ -220,6 +240,16 @@ export const PROMPT_BLOCKS: PromptBlock[] = [
     regional: false,
   },
 
+  {
+    id: "enh-photo",
+    category: "style",
+    label: "建築攝影成像",
+    hint: "整體渲染增強用：像全片幅相機拍的建築攝影；不 HDR 光暈、不過飽和、不過度銳利。",
+    text: "The final image must read as a real high-end architectural photograph from a full-frame camera: accurate white balance, natural contrast with smooth highlight roll-off, clean verticals, sharp focus throughout and fine real-world detail. No HDR halo, no oversaturation, no oversharpening, no CG or painterly look.",
+    defaultOn: false,
+    regional: false,
+  },
+
   // ---- 輸出 ----
   {
     id: "out-clean",
@@ -239,6 +269,9 @@ export const BLOCK_BY_ID: Record<string, PromptBlock> = Object.fromEntries(
 export const DEFAULT_BLOCK_IDS = PROMPT_BLOCKS.filter((b) => b.defaultOn).map(
   (b) => b.id,
 );
+
+/** 一鍵「整體渲染增強」會加上的積木（全圖、不框選時使用） */
+export const ENHANCE_BLOCK_IDS = ["enh-light", "enh-material", "enh-photo"];
 
 /** 一律附加的排除清單（四輪累積的實際瑕疵型態） */
 export const REJECT_LIST =

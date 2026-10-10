@@ -50,13 +50,19 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 });
   }
-  await updateCompany((c) => {
-    const block = c[provider];
-    if (fresh) block.key = sealKey(fresh, user.email);
-    block.models = models;
-    if (!models.some((m) => m.id === block.model)) block.model = (models.find((m) => m.recommended) ?? models[0]).id;
-  });
-  return NextResponse.json({ ok: true, found: models.length, settings: await publicSettings(user) });
+  try {
+    await updateCompany((c) => {
+      const block = c[provider];
+      if (fresh) block.key = sealKey(fresh, user.email);
+      block.models = models;
+      if (!models.some((m) => m.id === block.model)) block.model = (models.find((m) => m.recommended) ?? models[0]).id;
+    });
+    return NextResponse.json({ ok: true, found: models.length, settings: await publicSettings(user) });
+  } catch (e) {
+    // 只記錯誤種類與訊息，不含金鑰
+    console.error("[settings/key] save failed:", (e as Error).name, (e as Error).message);
+    return NextResponse.json({ error: `金鑰測試成功，但存到後台失敗：${(e as Error).message}` }, { status: 500 });
+  }
 }
 
 export async function DELETE(req: NextRequest) {
@@ -66,10 +72,15 @@ export async function DELETE(req: NextRequest) {
   if (!storeMode()) return NextResponse.json({ error: "後台儲存尚未啟用。" }, { status: 503 });
   const provider = req.nextUrl.searchParams.get("provider");
   if (!isProvider(provider)) return NextResponse.json({ error: "未知的供應商" }, { status: 400 });
-  await updateCompany((c) => {
-    c[provider].key = null;
-    c[provider].models = [];
-    c[provider].model = "";
-  });
-  return NextResponse.json(await publicSettings(user));
+  try {
+    await updateCompany((c) => {
+      c[provider].key = null;
+      c[provider].models = [];
+      c[provider].model = "";
+    });
+    return NextResponse.json(await publicSettings(user));
+  } catch (e) {
+    console.error("[settings/key] clear failed:", (e as Error).name, (e as Error).message);
+    return NextResponse.json({ error: `清除失敗：${(e as Error).message}` }, { status: 500 });
+  }
 }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { assertUnderCap, bumpUsage, CapReachedError, resolveOpenAI } from "@/lib/server/company";
-import { OPENAI_BASE, openaiError } from "@/lib/server/openai";
+import { OPENAI_BASE, openaiError, outputSizeFor } from "@/lib/server/openai";
 import { sessionUser } from "@/lib/server/session";
 
 /**
@@ -71,7 +71,8 @@ export async function POST(req: NextRequest) {
   upstream.append("model", cfg.model);
   upstream.append("prompt", prompt);
   upstream.append("n", "1");
-  upstream.append("size", "auto");
+  const size = outputSizeFor(cfg.model, Number(form.get("width")), Number(form.get("height")));
+  upstream.append("size", size);
   upstream.append("quality", quality);
   upstream.append("output_format", "jpeg");
   if (process.env.OPENAI_INPUT_FIDELITY) {
@@ -85,7 +86,8 @@ export async function POST(req: NextRequest) {
   // 比函式上限 300 秒早一點中止，才來得及回「結果未知」而不是被平台直接切斷
   const timer = setTimeout(() => ac.abort(), 285_000);
   // 用量紀錄失敗不影響出圖結果回傳
-  const count = () => bumpUsage("openaiImages", user.email).catch(() => {});
+  const count = () =>
+    bumpUsage("openaiImages", user.email).catch((e: Error) => console.error("[usage] bump failed:", e.name, e.message));
   try {
     const r = await fetch(`${OPENAI_BASE}/images/edits`, {
       method: "POST",

@@ -35,3 +35,24 @@ export async function listOpenAIImageModels(key: string): Promise<ModelOption[]>
   ids.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
   return ids.map((id, i) => ({ id, label: id, note: OPENAI_IMAGE_HINTS[id]?.note, recommended: i === 0 }));
 }
+
+/**
+ * 輸出尺寸。gpt-image-2 系列可指定任意尺寸（邊長 16 的倍數、長邊 ≤ 3840、總像素 655,360–8,294,400、
+ * 長短邊比 ≤ 3:1），要求與底圖同尺寸，省掉縮放與裁切；舊模型只有固定幾種尺寸，交給 auto。
+ */
+export function outputSizeFor(model: string, width: number, height: number): string {
+  if (!model.startsWith("gpt-image-2") || !(width > 0 && height > 0)) return "auto";
+  const long = Math.max(width, height);
+  const short = Math.min(width, height);
+  if (long / short > 3) return "auto";
+  let k = Math.min(1, 3840 / long);
+  let w = Math.round((width * k) / 16) * 16;
+  let h = Math.round((height * k) / 16) * 16;
+  if (w * h < 655_360) {
+    k = Math.sqrt(655_360 / (w * h));
+    w = Math.ceil((w * k) / 16) * 16;
+    h = Math.ceil((h * k) / 16) * 16;
+  }
+  if (w * h > 8_294_400) return "auto";
+  return `${w}x${h}`;
+}

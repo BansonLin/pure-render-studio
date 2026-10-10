@@ -113,10 +113,14 @@ function regionLine(r: Region, idx: number, objects: Map<string, SceneObject>) {
 export function compilePrompt(input: CompileInput): CompileOutput {
   const { project, view, regions, references } = input;
   const objects = new Map(project.sceneObjects.map((o) => [o.id, o]));
-  const blocks = input.blockIds.map((id) => BLOCK_BY_ID[id]).filter(Boolean);
-  const byCat = (c: string) => blocks.filter((b) => b.category === c).map((b) => b.text);
-
   const edits = regions.filter((r) => r.kind !== "lock");
+  // 沒有修改區時「只改選區、其餘一模一樣」會叫模型整張不准動，與全圖增強互相矛盾，模型會選擇幾乎不改
+  const blocks = input.blockIds
+    .map((id) => BLOCK_BY_ID[id])
+    .filter(Boolean)
+    .filter((b) => edits.length > 0 || b.id !== "keep-outside");
+  const byCat = (c: string) => blocks.filter((b) => b.category === c).map((b) => b.text);
+  const enhancing = blocks.some((b) => b.id.startsWith("enh-"));
   const locks = regions.filter((r) => r.kind === "lock");
   const lines: string[] = [];
   const zh: string[] = [];
@@ -189,8 +193,10 @@ export function compilePrompt(input: CompileInput): CompileOutput {
       "- Outside the listed regions the image must stay unchanged; the outside area will be restored from image 1 afterwards, so do not reframe, crop, zoom or shift the image.",
     );
   }
-  if (!edits.length && !input.rawRequest.trim()) {
-    lines.push("- Rendering quality only: improve realism, light and materials without any design change.");
+  if (!edits.length && (enhancing || !input.rawRequest.trim())) {
+    lines.push(
+      "- Whole-image rendering upgrade: make image 1 look like a real photograph of the SAME room. Improve lighting, materials and photographic quality as described below; every design decision (layout, furniture, colors, materials, decor) stays exactly the same.",
+    );
   }
   zh.push(
     edits.length
