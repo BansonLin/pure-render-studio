@@ -1,6 +1,6 @@
 # 交接文件 — 璞石 Render Studio
 
-> 更新：2026-10-10｜用途：在新的 Claude Code 對話（只選 `BansonLin/pure-render-studio`）接續開發時，先讀本檔與 `CLAUDE.md`。
+> 更新：2026-10-11｜用途：在新的 Claude Code 對話（只選 `BansonLin/pure-render-studio`）接續開發時，先讀本檔與 `CLAUDE.md`。
 
 ## 1. 一句話現況
 
@@ -53,7 +53,7 @@ Banson 原本用 GPT（ChatGPT 對話＋內建 image_gen）優化 3D 渲染圖�
 | 環境變數 | `AUTH_SECRET`（Secret）、`RESEND_API_KEY`（Secret，2026-10-09 新產生）、`ALLOWED_EMAILS`（目前只有 Banson）、`EMAIL_FROM=onboarding@resend.dev`、`APP_URL` |
 | 後台儲存 | Vercel Blob `render-studio-settings`（private，iad1，`store_o3K4XvEjOxrKjUaY`），已連到專案三個環境，自動加入 `BLOB_READ_WRITE_TOKEN` |
 | 選用（未設定） | `ADMIN_EMAILS`、`RENDER_LIVE`、`OPENAI_API_KEY`、`OPENAI_IMAGE_MODEL`（後三者為舊做法，建議改用設定頁） |
-| 姊妹專案 | `BansonLin/Pure-Dashboard`（營運儀表板，https://pure-dashboard.vercel.app）：**不同 repo、不同白名單、不同 cookie，勿交叉修改** |
+| 姊妹專案 | `BansonLin/Pure-Dashboard`（營運儀表板，https://pure-dashboard-mu.vercel.app）：**不同 repo、不同白名單、不同 cookie，勿交叉修改** |
 
 ## 5. 已知限制與風險
 
