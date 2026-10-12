@@ -1,11 +1,13 @@
 import {
   DEFAULT_ROOMS,
   type ClaudeEffort,
+  type GoogleImageSize,
   type ModelOption,
   type MonthUsage,
   type OpenAIQuality,
   type PublicSettings,
   type RoomPreset,
+  type UsageField,
 } from "@/lib/render/company-types";
 import { decryptSecret, encryptSecret } from "./crypto";
 import { readJson, storeMode, updateJson } from "./store";
@@ -33,6 +35,7 @@ interface ProviderBlock<Extra> {
 export interface CompanySettings {
   version: 1;
   openai: ProviderBlock<{ quality: OpenAIQuality }>;
+  google: ProviderBlock<{ size: GoogleImageSize }>;
   claude: ProviderBlock<{ effort: ClaudeEffort }>;
   rooms: RoomPreset[];
 }
@@ -44,6 +47,7 @@ const thisMonth = () => new Date().toISOString().slice(0, 7);
 export const DEFAULT_COMPANY: CompanySettings = {
   version: 1,
   openai: { key: null, model: "", models: [], monthlyCap: 100, extra: { quality: "high" } },
+  google: { key: null, model: "", models: [], monthlyCap: 100, extra: { size: "2K" } },
   claude: { key: null, model: "", models: [], monthlyCap: 300, extra: { effort: "high" } },
   rooms: DEFAULT_ROOMS,
 };
@@ -54,6 +58,7 @@ function normalize(raw: Partial<CompanySettings>): CompanySettings {
   return {
     version: 1,
     openai: { ...d.openai, ...raw.openai, extra: { ...d.openai.extra, ...raw.openai?.extra } },
+    google: { ...d.google, ...raw.google, extra: { ...d.google.extra, ...raw.google?.extra } },
     claude: { ...d.claude, ...raw.claude, extra: { ...d.claude.extra, ...raw.claude?.extra } },
     rooms: Array.isArray(raw.rooms) && raw.rooms.length ? raw.rooms : d.rooms,
   };
@@ -79,30 +84,47 @@ export function sealKey(plain: string, by: string): StoredKey {
 
 // ---- 用量與上限（全公司共用，伺服器端計算） ----
 
-const emptyUsage = (month: string): MonthUsage => ({ month, openaiImages: 0, claudeReviews: 0, byUser: {} });
+const emptyUsage = (month: string): MonthUsage => ({ month, openaiImages: 0, googleImages: 0, claudeReviews: 0, byUser: {} });
+
+/** 舊月份檔案沒有後來新增的計數欄位，讀進來一律補 0 */
+function normalizeUsage(u: MonthUsage): MonthUsage {
+  const n = (x: unknown) => (typeof x === "number" ? x : 0);
+  const byUser: MonthUsage["byUser"] = {};
+  for (const [email, w] of Object.entries(u.byUser ?? {})) {
+    byUser[email] = { openaiImages: n(w?.openaiImages), googleImages: n(w?.googleImages), claudeReviews: n(w?.claudeReviews) };
+  }
+  return { month: u.month, openaiImages: n(u.openaiImages), googleImages: n(u.googleImages), claudeReviews: n(u.claudeReviews), byUser };
+}
 
 export async function loadUsage(): Promise<MonthUsage> {
   const m = thisMonth();
   if (!storeMode()) return emptyUsage(m);
-  return (await readJson<MonthUsage>(usageKey(m), emptyUsage(m))).value;
+  return normalizeUsage((await readJson<MonthUsage>(usageKey(m), emptyUsage(m))).value);
 }
 
-export async function bumpUsage(field: "openaiImages" | "claudeReviews", email: string) {
+export async function bumpUsage(field: UsageField, email: string) {
   if (!storeMode()) return;
   const m = thisMonth();
-  await updateJson<MonthUsage>(usageKey(m), emptyUsage(m), (u) => {
+  await updateJson<MonthUsage>(usageKey(m), emptyUsage(m), (raw) => {
+    const u = normalizeUsage(raw);
     u[field] += 1;
-    const who = (u.byUser[email] ??= { openaiImages: 0, claudeReviews: 0 });
+    const who = (u.byUser[email] ??= { openaiImages: 0, googleImages: 0, claudeReviews: 0 });
     who[field] += 1;
     return u;
   });
 }
 
-export async function assertUnderCap(field: "openaiImages" | "claudeReviews", cap: number | null) {
+const USAGE_LABEL: Record<UsageField, (n: number) => string> = {
+  openaiImages: (n) => `OpenAI 出圖 ${n} 張`,
+  googleImages: (n) => `Google 出圖 ${n} 張`,
+  claudeReviews: (n) => `Claude ${n} 次`,
+};
+
+export async function assertUnderCap(field: UsageField, cap: number | null) {
   if (cap === null) return;
   const u = await loadUsage();
   if (u[field] >= cap) {
-    const what = field === "openaiImages" ? `AI 出圖 ${u[field]} 張` : `Claude 驗收 ${u[field]} 次`;
+    const what = USAGE_LABEL[field](u[field]);
     throw new CapReachedError(`本月全公司已用 ${what}，達到上限 ${cap}。請管理者到「設定」調整。`);
   }
 }
@@ -135,6 +157,16 @@ export async function resolveOpenAI(): Promise<{ key: string; model: string; qua
   return { error: "尚未設定 OpenAI 金鑰，請管理者到「設定」輸入。" };
 }
 
+export async function resolveGoogle(): Promise<{ key: string; model: string; size: GoogleImageSize; cap: number | null } | { error: string }> {
+  const c = await loadCompany();
+  if (c.google.key && c.google.model) {
+    const key = openSecret(c.google.key.enc);
+    if (!key) return { error: UNREADABLE };
+    return { key, model: c.google.model, size: c.google.extra.size, cap: c.google.monthlyCap };
+  }
+  return { error: "尚未設定 Google 金鑰，請管理者到「設定」輸入。" };
+}
+
 export async function resolveClaude(): Promise<{ key: string; model: string; effort: ClaudeEffort; cap: number | null } | { error: string }> {
   const c = await loadCompany();
   if (c.claude.key && c.claude.model) {
@@ -163,6 +195,17 @@ export async function publicSettings(user: { email: string; isAdmin: boolean }):
       models: c.openai.models,
       monthlyCap: c.openai.monthlyCap,
       extra: c.openai.extra,
+    },
+    google: {
+      configured: !!(c.google.key && c.google.model),
+      source: c.google.key ? "stored" : "none",
+      last4: c.google.key?.last4 ?? "",
+      setAt: c.google.key?.setAt ?? null,
+      setBy: c.google.key?.setBy ?? null,
+      model: c.google.model,
+      models: c.google.models,
+      monthlyCap: c.google.monthlyCap,
+      extra: c.google.extra,
     },
     claude: {
       configured: !!(c.claude.key && c.claude.model),

@@ -5,11 +5,12 @@ import { ArrowDown, ArrowUp, CheckCircle2, KeyRound, Loader2, Plus, RotateCcw, S
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { inputCls, useBusy, useToast } from "@/components/render/primitives";
-import { clearProviderKey, patchCompany, saveProviderKey, useCompany } from "@/lib/render/company";
+import { clearProviderKey, patchCompany, saveProviderKey, useCompany, type KeyProvider } from "@/lib/render/company";
 import { CLAUDE_PRICE } from "@/lib/render/claude";
 import {
   DEFAULT_ROOMS,
   type ClaudeEffort,
+  type GoogleImageSize,
   type OpenAIQuality,
   type PublicProvider,
   type PublicSettings,
@@ -58,8 +59,8 @@ export function SettingsPanel() {
           <li>
             金鑰<strong className="text-foreground">加密</strong>存在璞石後台（Vercel 私有儲存），之後任何人（包括管理者自己）都只看得到末四碼。
           </li>
-          <li>出圖與驗收由伺服器代為呼叫 OpenAI／Anthropic，金鑰不會傳到任何人的瀏覽器，也不會進專案備份。</li>
-          <li>全公司每月上限由伺服器把關；也請在 OpenAI、Anthropic 後台各設一個花費上限，雙重保險。</li>
+          <li>出圖與驗收由伺服器代為呼叫 OpenAI／Google／Anthropic，金鑰不會傳到任何人的瀏覽器，也不會進專案備份。</li>
+          <li>全公司每月上限由伺服器把關；也請在各家供應商後台設花費上限或預算提醒，雙重保險。</li>
         </ul>
       </div>
 
@@ -99,9 +100,44 @@ export function SettingsPanel() {
       </ProviderCard>
 
       <ProviderCard
+        provider="google"
+        title="Google Nano Banana（AI 出圖）"
+        purpose="Luma 調查中寫實度最好的模型就是它（Nano Banana Pro）。版本頁「2 生成」選「Google Nano Banana」即可直接出圖。"
+        placeholder="AIza…"
+        info={s.google}
+        admin={admin}
+        getKeyHref="https://aistudio.google.com/apikey"
+        getKeyLabel="Google AI Studio → API keys"
+        onModel={(model) => patch({ google: { model } })}
+      >
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Field label="輸出解析度">
+            <select
+              className={inputCls}
+              disabled={!admin || !!busy}
+              value={s.google.extra.size}
+              onChange={(e) => patch({ google: { size: e.target.value as GoogleImageSize } })}
+            >
+              <option value="2K">2K（建議）</option>
+              <option value="1K">1K（只適合試方向）</option>
+            </select>
+          </Field>
+          <CapField value={s.google.monthlyCap} unit="張" disabled={!admin || !!busy} onChange={(monthlyCap) => patch({ google: { monthlyCap } })} />
+          <Field label="本月已用（全公司）">
+            <p className="py-1.5 text-sm font-semibold">
+              {s.usage.googleImages} 張{s.google.monthlyCap !== null && <span className="font-normal text-muted-foreground"> ／ {s.google.monthlyCap}</span>}
+            </p>
+          </Field>
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          參考價【示意】：第三方整理 Nano Banana Pro 1K–2K 一張約 US$0.13，以 Google 官方價目為準。Google 專案必須綁定付費帳戶：免費額度送出的圖可能被拿去訓練模型，付費層不會。
+        </p>
+      </ProviderCard>
+
+      <ProviderCard
         provider="claude"
-        title="Claude（看圖驗收）"
-        purpose="版本頁「3 驗收」按「請 Claude 檢查」，逐項對照檢查清單給建議，按一下就能採用。"
+        title="Claude（看圖驗收、寫精簡指令）"
+        purpose="版本頁「1 指令」可請 Claude 看圖寫精簡指令；「3 驗收」按「請 Claude 檢查」，逐項對照檢查清單給建議。"
         placeholder="sk-ant-…"
         info={s.claude}
         admin={admin}
@@ -135,7 +171,7 @@ export function SettingsPanel() {
           </Field>
         </div>
         <p className="text-[11px] text-muted-foreground">
-          每次檢查約送 2 張 2048 寬的圖：Opus 5.5 約 US$0.05–0.15、Sonnet 5.5 約一半【示意：輸入約 8 千 token、輸出 2–5 千 token】。實際費用在檢查結果下方顯示。
+          每次檢查約送 2 張 2048 寬的圖：Opus 5.5 約 US$0.05–0.15、Sonnet 5.5 約一半【示意：輸入約 8 千 token、輸出 2–5 千 token】；寫一次精簡指令通常更便宜。驗收與寫指令共用這個上限。
         </p>
       </ProviderCard>
 
@@ -175,7 +211,7 @@ function CapField({ value, unit, disabled, onChange }: { value: number | null; u
 }
 
 function ProviderCard(p: {
-  provider: "openai" | "claude";
+  provider: KeyProvider;
   title: string;
   purpose: string;
   placeholder: string;
@@ -333,8 +369,9 @@ function UsageByUser({ s }: { s: PublicSettings }) {
         <thead className="text-left text-muted-foreground">
           <tr>
             <th className="py-1 font-medium">使用者</th>
-            <th className="py-1 text-right font-medium">AI 出圖</th>
-            <th className="py-1 text-right font-medium">Claude 驗收</th>
+            <th className="py-1 text-right font-medium">OpenAI 出圖</th>
+            <th className="py-1 text-right font-medium">Google 出圖</th>
+            <th className="py-1 text-right font-medium">Claude</th>
           </tr>
         </thead>
         <tbody>
@@ -342,6 +379,7 @@ function UsageByUser({ s }: { s: PublicSettings }) {
             <tr key={email} className="border-t border-border">
               <td className="py-1">{email}</td>
               <td className="py-1 text-right">{u.openaiImages} 張</td>
+              <td className="py-1 text-right">{u.googleImages} 張</td>
               <td className="py-1 text-right">{u.claudeReviews} 次</td>
             </tr>
           ))}

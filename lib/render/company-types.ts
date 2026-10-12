@@ -18,6 +18,8 @@ export interface RoomPreset {
 
 export type OpenAIQuality = "medium" | "high";
 export type ClaudeEffort = "medium" | "high" | "xhigh";
+/** 不提供 4K：結果匯入時會縮回底圖尺寸，4K 只會多花錢 */
+export type GoogleImageSize = "1K" | "2K";
 
 /** 給瀏覽器看的設定：只有金鑰末四碼，永遠不含金鑰本身 */
 export interface PublicProvider<Extra> {
@@ -33,11 +35,15 @@ export interface PublicProvider<Extra> {
   extra: Extra;
 }
 
+export type UsageField = "openaiImages" | "googleImages" | "claudeReviews";
+
 export interface MonthUsage {
   month: string;
   openaiImages: number;
+  googleImages: number;
+  /** Claude 驗收與寫精簡指令共用這個計數 */
   claudeReviews: number;
-  byUser: Record<string, { openaiImages: number; claudeReviews: number }>;
+  byUser: Record<string, Record<UsageField, number>>;
 }
 
 export interface PublicSettings {
@@ -45,6 +51,7 @@ export interface PublicSettings {
   isAdmin: boolean;
   email: string;
   openai: PublicProvider<{ quality: OpenAIQuality }>;
+  google: PublicProvider<{ size: GoogleImageSize }>;
   claude: PublicProvider<{ effort: ClaudeEffort }>;
   rooms: RoomPreset[];
   usage: MonthUsage;

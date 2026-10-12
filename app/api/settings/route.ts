@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import type { ClaudeEffort, OpenAIQuality, RoomPreset } from "@/lib/render/company-types";
+import type { ClaudeEffort, GoogleImageSize, OpenAIQuality, RoomPreset } from "@/lib/render/company-types";
 import { publicSettings, updateCompany } from "@/lib/server/company";
 import { storeMode } from "@/lib/server/store";
 import { sessionUser } from "@/lib/server/session";
@@ -22,6 +22,7 @@ const capOk = (v: unknown) => v === null || (typeof v === "number" && CAPS.has(v
 
 interface Patch {
   openai?: { model?: string; quality?: OpenAIQuality; monthlyCap?: number | null };
+  google?: { model?: string; size?: GoogleImageSize; monthlyCap?: number | null };
   claude?: { model?: string; effort?: ClaudeEffort; monthlyCap?: number | null };
   rooms?: RoomPreset[];
 }
@@ -39,6 +40,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "格式錯誤" }, { status: 400 });
   }
   if (body.openai?.monthlyCap !== undefined && !capOk(body.openai.monthlyCap)) return NextResponse.json({ error: "上限數值不在選項內" }, { status: 400 });
+  if (body.google?.monthlyCap !== undefined && !capOk(body.google.monthlyCap)) return NextResponse.json({ error: "上限數值不在選項內" }, { status: 400 });
   if (body.claude?.monthlyCap !== undefined && !capOk(body.claude.monthlyCap)) return NextResponse.json({ error: "上限數值不在選項內" }, { status: 400 });
   if (body.rooms) {
     const names = body.rooms.map((r) => String(r.name ?? "").trim());
@@ -53,6 +55,10 @@ export async function PATCH(req: NextRequest) {
       if (o?.model !== undefined && c.openai.models.some((m) => m.id === o.model)) c.openai.model = o.model;
       if (o?.quality === "medium" || o?.quality === "high") c.openai.extra.quality = o.quality;
       if (o?.monthlyCap !== undefined) c.openai.monthlyCap = o.monthlyCap;
+      const g = body.google;
+      if (g?.model !== undefined && c.google.models.some((m) => m.id === g.model)) c.google.model = g.model;
+      if (g?.size === "1K" || g?.size === "2K") c.google.extra.size = g.size;
+      if (g?.monthlyCap !== undefined) c.google.monthlyCap = g.monthlyCap;
       const a = body.claude;
       if (a?.model !== undefined && c.claude.models.some((m) => m.id === a.model)) c.claude.model = a.model;
       if (a?.effort === "medium" || a?.effort === "high" || a?.effort === "xhigh") c.claude.extra.effort = a.effort;
