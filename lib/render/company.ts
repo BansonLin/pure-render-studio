@@ -3,6 +3,8 @@
 import * as React from "react";
 import type { PublicSettings } from "./company-types";
 
+export type KeyProvider = "openai" | "google" | "claude";
+
 /**
  * 瀏覽器端讀寫公司設定（後台）。整個分頁共用一份快取，任何地方改完都會同步。
  * 金鑰只送進 /api/settings/key，之後只會拿到末四碼。
@@ -46,7 +48,7 @@ export async function patchCompany(body: unknown) {
   set(await call<PublicSettings>("/api/settings", { method: "PATCH", body: JSON.stringify(body) }));
 }
 
-export async function saveProviderKey(provider: "openai" | "claude", key?: string) {
+export async function saveProviderKey(provider: KeyProvider, key?: string) {
   const r = await call<{ found: number; settings: PublicSettings }>("/api/settings/key", {
     method: "POST",
     body: JSON.stringify({ provider, key }),
@@ -55,7 +57,7 @@ export async function saveProviderKey(provider: "openai" | "claude", key?: strin
   return r.found;
 }
 
-export async function clearProviderKey(provider: "openai" | "claude") {
+export async function clearProviderKey(provider: KeyProvider) {
   set(await call<PublicSettings>(`/api/settings/key?provider=${provider}`, { method: "DELETE" }));
 }
 

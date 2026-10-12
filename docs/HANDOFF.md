@@ -1,6 +1,6 @@
 # 交接文件 — 璞石 Render Studio
 
-> 更新：2026-10-10｜用途：在新的 Claude Code 對話（只選 `BansonLin/pure-render-studio`）接續開發時，先讀本檔與 `CLAUDE.md`。
+> 更新：2026-10-12｜用途：在新的 Claude Code 對話（只選 `BansonLin/pure-render-studio`）接續開發時，先讀本檔與 `CLAUDE.md`。
 
 ## 1. 一句話現況
 
@@ -32,9 +32,10 @@ Banson 原本用 GPT（ChatGPT 對話＋內建 image_gen）優化 3D 渲染圖�
 | 2026-10-09 | Banson 要求「設定頁可填 OpenAI、Claude 金鑰」與「表單盡量用選單」 | Claude 用於看圖驗收建議；見第 8 節 |
 | 2026-10-10 | Banson 要求「金鑰輸入一次、記錄在後台」、空間名稱用選單並預設常用空間、圖號有預設且留空自動編 | 建立 Vercel Blob 私有儲存 `render-studio-settings`（`store_o3K4XvEjOxrKjUaY`，iad1）；金鑰 AES-GCM 加密存後台、伺服器代呼叫；管理者才能改；全公司月上限伺服器把關；空間與圖號預設存後台可編；見第 8 節與 `docs/SETTINGS-GUIDE.md` |
 | 2026-10-10 | Banson 回報：OpenAI 金鑰設定成功且實際出圖成功；Claude 金鑰「測試並儲存」一直回 500；GPT 出圖效果不如 Astra | 500 根因：Blob 寫入時用 `get()` 的 HTTP ETag 做樂觀鎖，與 `put({ ifMatch })` 比對的 ETag 不同 → 第二次寫同一檔（存第二把金鑰）必失敗；改用 `head()` 的 ETag、被拒時重讀並覆寫。效果落差：全圖模式提示詞仍含「只改選區、其餘一模一樣」、底圖縮到 1536 且輸出 `auto`、積木偏修瑕疵 → 新增「一鍵整體渲染增強」、全圖模式不帶選區限制、gpt-image-2 依原圖比例輸出（2048×1152）。見 8.2 |
+| 2026-10-11 | Banson 回報 Claude 金鑰已存好，但 GPT 出圖仍不如預期；提供 Luma board，並用電腦操作的 Claude 完成 Luma 調查報告 | Luma 效果好的主因：背後是 Google **Nano Banana Pro**（`gemini-3-pro-image`）＋ Agent（Claude）逐圖寫的短指令＋參考圖寫明用途。Luma 沒有遮罩與框外還原，「全套統一」第二輪造成憑空加窗、白櫃變木紋、吊燈掛錯。決定：工作台直接接 Google（不經 Luma）＋新增 Claude 精簡指令，保留工作台的框外還原與鏡位校正。見 8.3 |
 
 其他已定案：
-- **生成供應商**：ChatGPT 任務包（手動）與 OpenAI API（後台金鑰）並存；後台有金鑰時「2 生成」預設切到 API。2026-10-10 Banson 已用真金鑰出圖成功一次【實際】。是否全面改用 API，等 P0 試跑數據（每張工時、修正輪數、單張費用）再決定。
+- **生成供應商**：手動任務包（ChatGPT／Luma）、OpenAI API、Google Nano Banana（皆用後台金鑰）並存；「2 生成」預設優先 Google，其次 OpenAI，都沒有才是手動。2026-10-10 Banson 已用真金鑰出圖成功一次【實際】。是否全面改用 API，等 P0 試跑數據（每張工時、修正輪數、單張費用）再決定。
 - **金鑰放哪裡**（2026-10-10 改定）：後台集中保管。Vercel Blob（private）存 `settings/company.json`，金鑰以 `AUTH_SECRET` 衍生的 AES-256-GCM 加密；只有伺服器解密，瀏覽器只拿到末四碼。出圖、驗收都由伺服器路由呼叫（`maxDuration = 300`）。管理者＝`ADMIN_EMAILS`，未設定時為白名單第一位。原本「裝置 localStorage＋瀏覽器直連」的做法（PR #3 第一版）已移除，舊的 localStorage 金鑰在使用者下次記住核准者時被清掉。換 `AUTH_SECRET` 需重新輸入金鑰。
 - **預算上限**：全公司每月張數／次數上限存在後台、伺服器在呼叫供應商前檢查（`usage/YYYY-MM.json`，含每人用量）。供應商後台硬上限仍建議設定。
 - **Claude 的角色**：看圖驗收建議（對照底圖與結果、逐項給建議與問題清單），不改寫使用者原文、不自動核准。
@@ -123,6 +124,25 @@ Banson 原本用 GPT（ChatGPT 對話＋內建 image_gen）優化 3D 渲染圖�
   5. Astra（OpenAI，2026-09）是能操作 Blender、反覆檢查自己算圖結果的代理流程；本工具是一次受約束的影像編輯呼叫，兩者不是同一類產品，效果上限不同。
 - **實測【實際】**（本機檔案儲存＋模擬供應商）：連續存 OpenAI 與 Claude 金鑰成功；整體增強出圖送出 `size=2048x1152`、提示詞不含選區限制、含全圖增強段落；有框選時仍含選區限制；用量 1／1；上限 429；平板、備份、手勢回歸無 pageerror。**真實 Blob 寫入與 gpt-image-2 接受自訂尺寸需部署後由 Banson 各試 1 次。**
 
+### 8.3 Luma 調查與 Google Nano Banana、Claude 精簡指令（2026-10-11）
+
+調查來源：Banson 用可操作電腦的 Claude 讀 Luma board「Product Furniture References」（13 張 3D 渲染＋軟裝廠商報價單與提案 PDF；另 10 張重渲圖做 4K 放大與加人）。報告與截圖在 Banson 電腦，**含客戶圖面，不進 repo**。
+
+| 發現 | 對工作台的意義 |
+|---|---|
+| 所有修圖都是 Nano Banana Pro（Luma 介面裡選的第三方模型），2K 一張 35 點【實際】 | 效果來自模型，不是 Luma 本身；Luma API 只開放自家 Uni-1.1／Ray3.2，所以直接接 Google |
+| Agent（背後是 Claude）逐圖寫 80–200 字英文指令：「Replace X with … Keep exactly unchanged: 點名現場物件 … Do not add …」；參考圖在指令裡寫明用途 | 新增「Claude 精簡指令」；工作台原本的完整編譯指令約 5,300 字、通用規則，可能稀釋重點 |
+| 只修一輪的圖結構最乾淨；第二輪「at all windows」「any visible cabinetry」造成憑空加窗、白櫃與廚具變木紋、門變色、吊燈掛錯位置 | 驗證了「單跳原則」；預檢新增「所有／統一／整組」泛指說法警示 |
+| Luma 的框選（Annotate）只是把框畫進新圖再整張重繪，實測框外仍有差異（平均 3.6–4.0/255） | 工作台的「框外回貼原像素」＋「鏡位校正」是 Luma 沒有的保護，保留 |
+| 重渲過、燈光材質本來就好的原圖，最終結果最好 | AI 是最後一哩；3D 出圖品質仍是基礎（列入 3D 出圖 SOP） |
+| SeedVR2 不改內容放大到 4K，一張 10 點 | 交付放大可再評估（P2） |
+
+實作：
+- **Google 供應商**：`lib/server/google.ts`（`/v1beta/models` 動態載入可改圖的影像模型，排除 Imagen；`generateContent` 送底圖＋參考圖＋指令，`imageConfig` 取最接近底圖的比例與後台設定的 1K／2K；略過思考過程的草稿圖，取最後一張正式輸出，用 `sharp` 轉成 JPEG（Google 回 PNG，2K 常 6–9 MB，超過 Vercel 函式回應約 4.5 MB 上限）；被安全機制擋下時回原因、不計用量）。後台多一個 `google` 區塊與月上限、`usage.googleImages`（舊月份檔讀取時補 0）。
+- **Claude 精簡指令**：`/api/prompt`＋`writeEditPrompt`（結構化輸出：指令、點名保留清單、中文摘要、警示），與驗收共用 Claude 月上限。版本選填欄位 `shortPrompt`（含 `basis` 指紋，需求／選區／參考圖／積木變更後提醒重寫）。勾「使用」時 API 出圖與手動任務包都改用它。
+- **手動任務包**也可用在 Luma（Modify Image → Nano Banana Pro），說明已加入任務包。
+- **實測【實際】**（本機檔案儲存＋模擬供應商）：錯誤 Google 金鑰不存；模型清單只列 2 個影像模型、Pro 排第一；存檔為密文；設計師設定 403；精簡指令送 1 張底圖＋原文需求，中文摘要與警示顯示、改需求後提醒重寫、手改後標示；任務包提示詞＝精簡指令；Google 出圖送 `gemini-3-pro-image`、16:9、2K、1 張圖、提示詞＝精簡指令；用量 Google 1／Claude 1；上限 429；安全機制擋下回原因且不計數；OpenAI、平板、備份、手勢回歸無 pageerror。**真實 Google 呼叫需 Banson 設金鑰後試 1 張**（Gemini API 文件格式近期有變動，若回 400 請把錯誤訊息給開發）。
+
 ## 9. 待辦（建議順序）
 
 | 優先 | 事項 | 驗收標準 | 負責 |
@@ -131,13 +151,14 @@ Banson 原本用 GPT（ChatGPT 對話＋內建 image_gen）優化 3D 渲染圖�
 | P0 | 確認建商合約對圖面上傳第三方 AI 的限制 | 書面結論 | Banson／法務 |
 | P0 | Resend 驗證網域、開放同事登入 | 設計師可自行收信登入 | Banson（DNS）＋開發 |
 | P0 | iPad 實機 Safari 走一次完整流程（依 `docs/DEVICE-GUIDE.md`） | 下載任務包、匯入結果、匯出／匯入備份皆正常 | Banson 或設計主管 |
-| P0 | 部署 8.2 後：重新存 Claude 金鑰、用「一鍵整體渲染增強」出 1 張、請 Claude 驗收 1 次；兩家後台設每月硬上限（OpenAI 出圖已成功【實際】） | Claude 金鑰顯示已設定；增強圖原生 2048 寬、寫實度明顯提升；記錄單次費用 | Banson |
+| P0 | 部署 8.3 後：申請 Google Gemini API 金鑰（綁付費帳戶）存進設定；同一張圖各出 1 張比較：Google＋精簡指令 vs OpenAI＋精簡指令 vs OpenAI＋完整指令 | 記錄結構是否保住、寫實度、單張費用；決定主力供應商（Claude 金鑰已存好【實際】） | Banson |
 | P0 | 把「空間與圖號預設」改成公司慣用編號 | 新增視角時圖號自動帶出正確號碼 | Banson |
 | P1 | 專案改存伺服器＋多人共用（可沿用 Vercel Blob） | 換電腦、平板、手機可續作 | 開發 |
 | P1 | 登入改 Email 驗證碼（需伺服器端記錄嘗試次數） | 在 iPad 輸入碼即登入，不受信件開在哪個瀏覽器影響；可安全加 PWA | 開發 |
 | P1 | IndexedDB 資料遷移機制（`db.ts`） | 改資料結構不會弄壞既有專案 | 開發 |
 | P1 | 「不確定／假設事項」欄位、玻璃／鏡面語意積木 | 宜蘭案「室內門被畫成戶外」類錯誤不再發生 | 開發 |
 | P2 | 3D 端輸出 Material ID／物件 ID 通道 → 自動產生精準選區 | 選區從手框變自動 | 開發＋3D 設計師 |
+| P2 | 交付前不改內容的 4K 放大（如 SeedVR2）、已核准圖轉行銷短片（Luma Ray） | 放大後構圖不變；短片 15 秒 9:16 | 開發＋行銷 |
 | P2 | 360 輸出規範寫進 3D 出圖 SOP（同點位、6 面或直出全景） | 每案可直接縫合、無補色區 | 設計主管 |
 
 ## 10. 新對話怎麼開始

@@ -193,6 +193,27 @@ export interface VersionEvent {
   detail?: string;
 }
 
+/**
+ * 精簡指令：Claude 看底圖後逐一點名畫面裡要保留的物件、只列 1–4 項變更。
+ * Luma 調查發現這種短指令在只修一輪時結構保持最好；長篇通用規則反而容易被模型忽略。
+ */
+export interface ShortPrompt {
+  /** 實際送給模型的英文指令（可人工修改） */
+  text: string;
+  /** 給設計師核對的中文說明 */
+  summaryZh: string;
+  /** 指令中點名保留的物件（英文，供核對） */
+  keep: string[];
+  warningsZh: string[];
+  at: string;
+  model: string;
+  /** 寫指令當下的需求、選區、參考圖、積木；之後有變就提醒重寫 */
+  basis: string;
+  edited: boolean;
+  /** 出圖與任務包改用這段指令 */
+  use: boolean;
+}
+
 export interface Version {
   id: string;
   viewId: string;
@@ -214,8 +235,10 @@ export interface Version {
   compilerVersion: string;
   /** 衍生視角送出時釘選的主圖版本與雜湊；主圖變更時據此判定需重驗 */
   pinnedMasters: { viewId: string; versionId: string; sha256: string }[];
-  provider: "manual" | "openai";
+  provider: "manual" | "openai" | "google";
   providerJobId: string | null;
+  /** Claude 逐圖寫的精簡指令；選填，舊資料沒有 */
+  shortPrompt?: ShortPrompt;
   /** AI 原始輸出（未回貼） */
   rawResultAssetId: string | null;
   /** 最終候選（已回復原尺寸、可能已回貼選區外像素） */
