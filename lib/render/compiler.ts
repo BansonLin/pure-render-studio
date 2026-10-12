@@ -160,6 +160,11 @@ export function compilePrompt(input: CompileInput): CompileOutput {
           `- Image ${n} = STYLE reference "${label}" for mood and color only${note ? ` (${note})` : ""}; no objects or layout.`,
         );
         break;
+      case "look":
+        lines.push(
+          `- Image ${n} = LOOK reference "${label}": the SAME camera after an earlier lighting pass. Copy ONLY its time-of-day light, light direction, exposure, color grading${note ? ` and ${note}` : " and any person's identity and position"}. NEVER copy its surface textures, ripples, grain or microtexture: every surface keeps image 1's clean finish.`,
+        );
+        break;
       case "annotation":
         lines.push(
           `- Image ${n} = ANNOTATION GUIDE with numbered boxes marking the regions below. It is NOT content: never reproduce boxes, numbers, arrows or overlay colors.`,
@@ -263,7 +268,9 @@ export function compilePrompt(input: CompileInput): CompileOutput {
 
   // 6) 排除與輸出
   lines.push("");
-  lines.push(`REJECT: ${REJECT_LIST}.`);
+  // 「不准新增物件」會把要求的人物一起擋掉
+  const person = blocks.some((b) => b.id === "people-motion");
+  lines.push(`REJECT: ${REJECT_LIST}${person ? " (the single requested walking person is the only allowed addition)" : ""}.`);
   for (const t of byCat("output")) lines.push(t);
 
   zh.push(`積木 ${blocks.length} 塊：${blocks.map((b) => b.label).join("、")}`);

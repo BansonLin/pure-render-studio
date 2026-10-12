@@ -173,6 +173,15 @@ export const PROMPT_BLOCKS: PromptBlock[] = [
     regional: false,
   },
   {
+    id: "light-golden",
+    category: "lighting",
+    label: "黃金時刻（暖陽斜射）",
+    hint: "Codex 實測效果：低角度暖陽只從既有窗戶進來、長而柔的窗框影子；白色維持奶油白，不是整張橘色濾鏡。",
+    text: "Golden hour: believable low warm sunlight enters ONLY through the actual existing windows and glazed openings, following this view's real light direction, with long softly edged window-frame shadows and softly bounced warm ambient fill. Keep cream whites natural, never an orange filter. Existing LED accent lighting stays subtle. The exterior view stays exactly as supplied.",
+    defaultOn: false,
+    regional: false,
+  },
+  {
     id: "light-daylight",
     category: "lighting",
     label: "自然窗光",
@@ -250,6 +259,25 @@ export const PROMPT_BLOCKS: PromptBlock[] = [
     regional: false,
   },
 
+  {
+    id: "style-film",
+    category: "style",
+    label: "電影膠片色調",
+    hint: "模擬富士 Classic Chrome：低飽和、暖中間調、略冷陰影。不加顆粒——顆粒在 Codex 實測裡會被看成水波紋。",
+    text: "Photographic treatment: simulate a Fujifilm X-S10 with Classic Chrome film simulation — restrained saturation, rich warm midtones, subtly cool neutral shadows, gentle highlight roll-off, cinematic atmosphere. Keep architectural verticals and crisp material detail. No film-grain overlay, no black bars, no vignette.",
+    defaultOn: false,
+    regional: false,
+  },
+  {
+    id: "people-motion",
+    category: "style",
+    label: "動態人物（1 秒快門虛影）",
+    hint: "同一位人物的外觀寫死在指令裡，各視角自然一致；人物只走在動線上，不擋設計重點。",
+    text: "Tripod-stable 1-second exposure: the whole static room stays tack-sharp and ONLY one walking adult shows natural translucent directional motion blur — a slim woman with dark brown straight hair just below the shoulders, an ivory long-sleeve blouse tucked into high-waisted taupe ankle-length trousers, barefoot; face unidentifiable through the motion. Correct human scale, floor contact and a subtle moving shadow. Place her in clear circulation space, never in front of the main design elements or crossing furniture. A real long-exposure architectural lifestyle photo: no ghost effect, no duplicate bodies, no whole-frame blur.",
+    defaultOn: false,
+    regional: false,
+  },
+
   // ---- 輸出 ----
   {
     id: "out-clean",
@@ -272,6 +300,50 @@ export const DEFAULT_BLOCK_IDS = PROMPT_BLOCKS.filter((b) => b.defaultOn).map(
 
 /** 一鍵「整體渲染增強」會加上的積木（全圖、不框選時使用） */
 export const ENHANCE_BLOCK_IDS = ["enh-light", "enh-material", "enh-photo"];
+
+/**
+ * 一鍵風格預設。同時移除會互相打架的積木：黃金時刻與「暖中性白平衡」的自然窗光衝突，
+ * 動態人物與「不加人物」的雜誌攝影衝突。
+ */
+export interface StylePreset {
+  id: string;
+  label: string;
+  hint: string;
+  add: string[];
+  remove: string[];
+}
+
+export const STYLE_PRESETS: StylePreset[] = [
+  {
+    id: "neutral",
+    label: "整體渲染增強",
+    hint: "中性日光：提升光影、材質與攝影質感，設計內容不變。",
+    add: ENHANCE_BLOCK_IDS,
+    remove: ["light-golden", "style-film", "people-motion"],
+  },
+  {
+    id: "golden",
+    label: "黃金時刻・電影感",
+    hint: "暖陽斜射＋膠片色調，不加人物。",
+    add: ["light-golden", "style-film", "enh-material"],
+    remove: ["light-daylight", "enh-light", "enh-photo", "people-motion"],
+  },
+  {
+    id: "golden-people",
+    label: "黃金時刻＋動態人物",
+    hint: "再加一位 1 秒快門的走動人物，生活感最強（Codex 奶油風案例的做法）。",
+    add: ["light-golden", "style-film", "enh-material", "people-motion"],
+    remove: ["light-daylight", "enh-light", "enh-photo", "style-magazine"],
+  },
+];
+
+export function applyPreset(blockIds: string[], preset: StylePreset): string[] {
+  return Array.from(new Set([...blockIds.filter((id) => !preset.remove.includes(id)), ...preset.add]));
+}
+
+export function presetActive(blockIds: string[], preset: StylePreset): boolean {
+  return preset.add.every((id) => blockIds.includes(id)) && !preset.remove.some((id) => blockIds.includes(id));
+}
 
 /** 一律附加的排除清單（四輪累積的實際瑕疵型態） */
 export const REJECT_LIST =

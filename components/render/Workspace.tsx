@@ -136,8 +136,9 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
       {tab === "pano" && <PanoPanel project={project} />}
       {tab === "delivery" && <DeliveryPanel project={project} />}
 
+      {/* 換版本就重新掛載：分頁、檢視模式回到該版本的預設（新草稿從「1 指令」開始） */}
       {editing && (
-        <VersionEditor project={project} versionId={editing} onClose={() => setEditing(null)} onSwitch={setEditing} />
+        <VersionEditor key={editing} project={project} versionId={editing} onClose={() => setEditing(null)} onSwitch={setEditing} />
       )}
 
       <Modal open={!!origView} onClose={() => setOriginal(null)} title={origView ? `視角 ${origView.id} · 3D 原圖（唯讀）` : ""} wide>

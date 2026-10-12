@@ -83,6 +83,7 @@ Next.js 14.2（App Router）＋ TypeScript ＋ Tailwind（CSS 變數色票，支
 - **整張增強 vs 局部修改**：沒有修改區時編譯器自動略過 `keep-outside`（否則等於叫模型整張不准動）；`enh-*` 積木（寫實光影、材質質感、建築攝影成像）預設關閉，由「一鍵：整體渲染增強」加入。有修改區時框外仍回貼 3D 原圖，增強只留在框內。
 - **Google 出圖**（`lib/server/google.ts`）：沒有遮罩，框選靠座標描述、匯入時框外回貼；底圖排第一並在每張圖前標「Image N」，與指令裡的 image N 對齊；`imageConfig` 比例取最接近底圖的固定比例，匯入時鏡位校正回原尺寸。回傳前用 `sharp` 轉 JPEG（PNG 會超過 Vercel 回應上限），所以不提供 4K。模型名稱常改，一律從 `/v1beta/models` 動態載入，不寫死。Google 專案必須綁付費帳戶（免費層資料可能被拿去訓練）。
 - **精簡指令**（Luma 調查的結論）：短、逐圖點名保留物件、只列 1–4 項變更；禁止「all windows／any visible cabinetry／統一」這類泛指。版本的 `shortPrompt.use` 為真時，API 出圖與任務包都用它（`activePrompt`）；`basis` 指紋不符就提醒重寫。
+- **風格預設與光影參考**（Codex 奶油風案例）：`STYLE_PRESETS` 一次增刪積木並移除互斥項（黃金時刻 vs 自然窗光、動態人物 vs 雜誌攝影不加人物）；`style-film` 不加顆粒。參考角色 `look`＝同視角先前光影版，只借光線、色調、人物，不借表面紋理；`redoFromOriginalWithLook` 以 3D 原圖重做並把結果放成第一張參考圖（image 2），世代深度歸零。
 - **出圖尺寸**：瀏覽器送 2048 長邊底圖與原圖寬高；`outputSizeFor` 只對 gpt-image-2 指定尺寸（16 的倍數、長邊 ≤3840、總像素 655,360–8,294,400、比例 ≤3:1），其他模型或超出規則回 `auto`。不要送 `input_fidelity` 給 gpt-image-2。
 - **空間與圖號**：新增視角的空間清單來自後台 `rooms`（`DEFAULT_ROOMS` 為預設）；圖號留空時 `suggestViewNumbers` 依起始號找空號，沒起始號接最大號。視角圖號建立後不可改（版本、物件聖經、釘選都以圖號串接）；其他欄位用 `updateView` 改。
 - **表單用選的**：有限選項用 `select`、常見但開放的用 `datalist`、需要兩者時用 `ChoiceInput`（選單＋「其他（自行輸入）」）；選項放 `options.ts`。使用者原文欄位（本輪需求、區域說明）維持自由文字。

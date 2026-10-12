@@ -163,6 +163,26 @@ export async function createDraft(projectId: string, viewId: string, strategy: B
   return id;
 }
 
+/**
+ * 光影滿意、表面卻有水波紋或怪紋時：從乾淨的 3D 原圖重做，這一版只當「光影參考」。
+ * Codex 奶油風案例實測：比在有紋路的圖上一修再修有效，也把世代深度歸零。
+ */
+export async function redoFromOriginalWithLook(projectId: string, versionId: string) {
+  const p = project(projectId);
+  const v = p.versions.find((x) => x.id === versionId);
+  if (!v?.resultAssetId) throw new Error("這個版本還沒有 AI 結果。");
+  const look = v.resultAssetId;
+  const id = await createDraft(projectId, v.viewId, "original");
+  await patchVersion(projectId, id, (x) => {
+    x.rawRequest = v.rawRequest;
+    x.blockIds = [...v.blockIds];
+    // 光影參考排第一張參考圖（image 2），與指令裡的編號對齊
+    x.references = [{ assetId: look, role: "look", note: "", source: "manual" }, ...x.references.filter((r) => r.assetId !== look)];
+    x.events.push({ at: now(), type: "look_redo", detail: `沿用 ${v.label} 的光影，從 3D 原圖重做` });
+  });
+  return id;
+}
+
 export async function patchVersion(projectId: string, versionId: string, fn: (v: Version) => void) {
   await store().mutate(projectId, (d) => {
     const v = d.versions.find((x) => x.id === versionId);
