@@ -75,6 +75,7 @@ export type ReferenceRole =
   | "object" // 物件參考：照抄造型、顏色、材質
   | "material" // 材質參考
   | "style" // 風格氛圍參考
+  | "look" // 同視角先前光影版：只借時段光線、色調與人物，不借表面紋理
   | "annotation"; // 標註示意圖（只供理解，不得畫出框線）
 
 export const REFERENCE_ROLE_LABEL: Record<ReferenceRole, string> = {
@@ -82,6 +83,7 @@ export const REFERENCE_ROLE_LABEL: Record<ReferenceRole, string> = {
   object: "物件參考",
   material: "材質參考",
   style: "風格參考",
+  look: "光影參考（同視角）",
   annotation: "標註示意",
 };
 

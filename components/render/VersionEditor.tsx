@@ -35,12 +35,13 @@ import {
   importResult,
   patchVersion,
   referenceLabels,
+  redoFromOriginalWithLook,
   runApiGeneration,
   setState,
   shortPromptStale,
 } from "@/lib/render/actions";
 import { preflight, shapeBounds, describeArea } from "@/lib/render/compiler";
-import { BLOCK_CATEGORY_LABEL, ENHANCE_BLOCK_IDS, PROMPT_BLOCKS, type BlockCategory } from "@/lib/render/prompt-blocks";
+import { applyPreset, BLOCK_CATEGORY_LABEL, PROMPT_BLOCKS, presetActive, STYLE_PRESETS, type BlockCategory } from "@/lib/render/prompt-blocks";
 import { fetchLiveStatus, PROVIDER_CAPS, type ApiProviderId, type LiveStatus, type ProviderId } from "@/lib/render/provider";
 import { rememberApprover, useDeviceSettings } from "@/lib/render/settings";
 import { useCompany } from "@/lib/render/company";
@@ -337,6 +338,13 @@ export function VersionEditor({
                     onSwitch(id);
                   })
                 }
+                onLookRedo={() =>
+                  run("look", async () => {
+                    const id = await redoFromOriginalWithLook(project.id, v.id);
+                    onSwitch(id);
+                    toast.ok("已開新版本：以 3D 原圖為底，這一版只當光影參考");
+                  })
+                }
                 onClaude={() =>
                   run("claude", async () => {
                     const review = await runClaudeReview(project, v);
@@ -553,22 +561,27 @@ function PromptTab({
       <Section title="提示詞積木" hint="全圖套用；選區積木請在標註卡片內勾">
         {editable && (
           <div className="space-y-1.5 rounded-lg border border-border bg-muted/40 p-2.5">
-            <Button
-              size="sm"
-              variant="outline"
-              className="w-full"
-              onClick={() =>
-                patch((x) => {
-                  x.blockIds = Array.from(new Set([...x.blockIds, ...ENHANCE_BLOCK_IDS]));
-                })
-              }
-            >
-              <Sparkles /> 一鍵：整體渲染增強
-            </Button>
+            <p className="text-[11px] font-semibold">一鍵風格</p>
+            <div className="flex flex-wrap gap-1.5">
+              {STYLE_PRESETS.map((pr) => {
+                const on = presetActive(v.blockIds, pr);
+                return (
+                  <Button
+                    key={pr.id}
+                    size="sm"
+                    variant={on ? "default" : "outline"}
+                    title={pr.hint}
+                    onClick={() => patch((x) => void (x.blockIds = applyPreset(x.blockIds, pr)))}
+                  >
+                    {on ? <Check /> : <Sparkles />} {pr.label}
+                  </Button>
+                );
+              })}
+            </div>
             <p className="text-[11px] leading-relaxed text-muted-foreground">
               {v.regions.some((r) => r.kind !== "lock")
-                ? "目前有框選修改區：框外最後會還原成 3D 原圖，增強只會留在框內。要整張變寫實，請先刪掉修改區。"
-                : "不框選、整張提升光影、材質與攝影質感，設計內容（家具、顏色、擺設）不變。"}
+                ? "目前有框選修改區：框外最後會還原成 3D 原圖，風格只會留在框內。要整張套用，請先刪掉修改區。"
+                : "不框選、整張套用；設計內容（家具、顏色、擺設）不變。同一案各視角用同一個預設，光線與人物會一致。"}
             </p>
           </div>
         )}
@@ -622,7 +635,7 @@ function PromptTab({
                     value={r.role}
                     onChange={(e) => patch((x) => void (x.references[i].role = e.target.value as ReferenceRole))}
                   >
-                    {(["master-view", "object", "material", "style"] as ReferenceRole[]).map((role) => (
+                    {(["master-view", "object", "material", "style", "look"] as ReferenceRole[]).map((role) => (
                       <option key={role} value={role}>
                         {REFERENCE_ROLE_LABEL[role]}
                       </option>
@@ -1165,6 +1178,7 @@ function QaTab({
   onState,
   onAccept,
   onRepair,
+  onLookRedo,
   onClaude,
 }: {
   project: RenderProject;
@@ -1174,6 +1188,7 @@ function QaTab({
   onState: (s: Version["state"], detail?: string) => void;
   onAccept: (by: string, note: string) => void;
   onRepair: () => void;
+  onLookRedo: () => void;
   onClaude: () => void;
 }) {
   const device = useDeviceSettings();
@@ -1326,6 +1341,16 @@ function QaTab({
           <Button size="sm" className="w-full" disabled={!!busy} onClick={onRepair}>
             開修正版本（框選問題區域）
           </Button>
+        )}
+        {v.resultAssetId && v.state !== "accepted" && (
+          <div className="space-y-1">
+            <Button size="sm" variant="outline" className="w-full" disabled={!!busy} onClick={onLookRedo}>
+              {busy === "look" ? <Loader2 className="animate-spin" /> : <Sparkles />} 用 3D 原圖重做，沿用這版光影
+            </Button>
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              光影滿意、但牆面或布面有水波紋時用：以乾淨原圖為底，這一版只借光線、色調與人物，不借表面紋理。比在這張上一修再修有效。
+            </p>
+          </div>
         )}
         {repairsUsed(project, v.viewId) >= project.repairLimit && (
           <p className="text-[11px] text-warning">
