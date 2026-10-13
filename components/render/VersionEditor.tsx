@@ -35,15 +35,17 @@ import {
   importResult,
   patchVersion,
   referenceLabels,
+  redoFromOriginalWithLook,
   runApiGeneration,
   setState,
+  shortPromptStale,
 } from "@/lib/render/actions";
 import { preflight, shapeBounds, describeArea } from "@/lib/render/compiler";
-import { BLOCK_CATEGORY_LABEL, ENHANCE_BLOCK_IDS, PROMPT_BLOCKS, type BlockCategory } from "@/lib/render/prompt-blocks";
-import { fetchLiveStatus, PROVIDER_CAPS, type LiveStatus } from "@/lib/render/provider";
+import { applyPreset, BLOCK_CATEGORY_LABEL, PROMPT_BLOCKS, presetActive, STYLE_PRESETS, type BlockCategory } from "@/lib/render/prompt-blocks";
+import { fetchLiveStatus, PROVIDER_CAPS, type ApiProviderId, type LiveStatus, type ProviderId } from "@/lib/render/provider";
 import { rememberApprover, useDeviceSettings } from "@/lib/render/settings";
 import { useCompany } from "@/lib/render/company";
-import { estimateCost, runClaudeReview } from "@/lib/render/claude";
+import { estimateCost, runClaudeReview, writeShortPrompt } from "@/lib/render/claude";
 import { REFERENCE_ROLE_LABEL } from "@/lib/render/types";
 import type { BaseStrategy, QaVerdict, ReferenceRole, Region, RenderProject, Version } from "@/lib/render/types";
 import { repairsUsed, STATE_LABEL } from "@/lib/render/workflow";
@@ -111,6 +113,7 @@ export function VersionEditor({
     repairsUsed: repairsUsed(project, view.id),
     repairLimit: project.repairLimit,
     maxReferences: PROVIDER_CAPS.manual.maxReferences,
+    requestTexts: [v.rawRequest, ...v.regions.map((r) => r.instruction)],
   });
   const includeContract = contractPref ?? !v.regions.some((r) => r.kind === "edit");
   const compiled = compileVersion(project, v, assets, { includeSceneContract: includeContract, maskSupported: false, annotation });
@@ -266,6 +269,14 @@ export function VersionEditor({
                 onCopy={() => {
                   navigator.clipboard.writeText(compiled.prompt).then(() => toast.ok("已複製提示詞"));
                 }}
+                busy={busy}
+                onWriteShort={() =>
+                  run("short", async () => {
+                    const sp = await writeShortPrompt(project, v, referenceLabels(project, assets));
+                    await patch((x) => void (x.shortPrompt = sp));
+                    toast.ok("Claude 已寫好精簡指令，請核對後再出圖");
+                  })
+                }
                 onCrop={(regionId, objectId) =>
                   run("crop", async () => {
                     await cropToObject(project.id, v.id, regionId, objectId);
@@ -296,9 +307,9 @@ export function VersionEditor({
                     toast.ok(notes.find((n) => n.includes("構圖")) ?? notes[0] ?? "已匯入並完成自動檢查");
                   })
                 }
-                onApi={(quality) =>
+                onApi={(quality, provider) =>
                   run("api", async () => {
-                    await runApiGeneration(project.id, v.id, { ...importOpts, includeSceneContract: includeContract, quality });
+                    await runApiGeneration(project.id, v.id, { ...importOpts, includeSceneContract: includeContract, quality, provider });
                     setMode("compare");
                     setTab("qa");
                     toast.ok("AI 結果已回傳並完成自動檢查");
@@ -325,6 +336,13 @@ export function VersionEditor({
                   run("repair", async () => {
                     const id = await createDraft(project.id, v.viewId, "parent", v.id);
                     onSwitch(id);
+                  })
+                }
+                onLookRedo={() =>
+                  run("look", async () => {
+                    const id = await redoFromOriginalWithLook(project.id, v.id);
+                    onSwitch(id);
+                    toast.ok("已開新版本：以 3D 原圖為底，這一版只當光影參考");
                   })
                 }
                 onClaude={() =>
@@ -405,6 +423,8 @@ function PromptTab({
   setAnnotation,
   onCopy,
   onCrop,
+  busy,
+  onWriteShort,
 }: {
   project: RenderProject;
   v: Version;
@@ -420,6 +440,8 @@ function PromptTab({
   setAnnotation: (b: boolean) => void;
   onCopy: () => void;
   onCrop: (regionId: string, objectId: string) => void;
+  busy: string | null;
+  onWriteShort: () => void;
 }) {
   const assets = useRenderStore((s) => s.assets);
   const labels = referenceLabels(project, assets);
@@ -539,22 +561,27 @@ function PromptTab({
       <Section title="提示詞積木" hint="全圖套用；選區積木請在標註卡片內勾">
         {editable && (
           <div className="space-y-1.5 rounded-lg border border-border bg-muted/40 p-2.5">
-            <Button
-              size="sm"
-              variant="outline"
-              className="w-full"
-              onClick={() =>
-                patch((x) => {
-                  x.blockIds = Array.from(new Set([...x.blockIds, ...ENHANCE_BLOCK_IDS]));
-                })
-              }
-            >
-              <Sparkles /> 一鍵：整體渲染增強
-            </Button>
+            <p className="text-[11px] font-semibold">一鍵風格</p>
+            <div className="flex flex-wrap gap-1.5">
+              {STYLE_PRESETS.map((pr) => {
+                const on = presetActive(v.blockIds, pr);
+                return (
+                  <Button
+                    key={pr.id}
+                    size="sm"
+                    variant={on ? "default" : "outline"}
+                    title={pr.hint}
+                    onClick={() => patch((x) => void (x.blockIds = applyPreset(x.blockIds, pr)))}
+                  >
+                    {on ? <Check /> : <Sparkles />} {pr.label}
+                  </Button>
+                );
+              })}
+            </div>
             <p className="text-[11px] leading-relaxed text-muted-foreground">
               {v.regions.some((r) => r.kind !== "lock")
-                ? "目前有框選修改區：框外最後會還原成 3D 原圖，增強只會留在框內。要整張變寫實，請先刪掉修改區。"
-                : "不框選、整張提升光影、材質與攝影質感，設計內容（家具、顏色、擺設）不變。"}
+                ? "目前有框選修改區：框外最後會還原成 3D 原圖，風格只會留在框內。要整張套用，請先刪掉修改區。"
+                : "不框選、整張套用；設計內容（家具、顏色、擺設）不變。同一案各視角用同一個預設，光線與人物會一致。"}
             </p>
           </div>
         )}
@@ -608,7 +635,7 @@ function PromptTab({
                     value={r.role}
                     onChange={(e) => patch((x) => void (x.references[i].role = e.target.value as ReferenceRole))}
                   >
-                    {(["master-view", "object", "material", "style"] as ReferenceRole[]).map((role) => (
+                    {(["master-view", "object", "material", "style", "look"] as ReferenceRole[]).map((role) => (
                       <option key={role} value={role}>
                         {REFERENCE_ROLE_LABEL[role]}
                       </option>
@@ -683,8 +710,10 @@ function PromptTab({
         </label>
       </Section>
 
+      <ShortPromptSection v={v} editable={editable} busy={busy} patch={patch} onWrite={onWriteShort} />
+
       <Section
-        title="編譯結果"
+        title={v.shortPrompt?.use ? "完整編譯指令（目前未使用）" : "編譯結果"}
         right={
           <div className="flex gap-1">
             <Button size="sm" variant="ghost" onClick={() => setShowPrompt((s) => !s)}>
@@ -708,6 +737,106 @@ function PromptTab({
         )}
       </Section>
     </>
+  );
+}
+
+function ShortPromptSection({
+  v,
+  editable,
+  busy,
+  patch,
+  onWrite,
+}: {
+  v: Version;
+  editable: boolean;
+  busy: string | null;
+  patch: (fn: (x: Version) => void) => Promise<void>;
+  onWrite: () => void;
+}) {
+  const { data: company } = useCompany();
+  const claudeReady = !!company?.claude.configured;
+  const sp = v.shortPrompt;
+  const stale = shortPromptStale(v);
+  const writeBtn = (
+    <Button size="sm" variant={sp ? "outline" : "default"} disabled={!editable || !claudeReady || !!busy} onClick={onWrite}>
+      {busy === "short" ? <Loader2 className="animate-spin" /> : <Sparkles />} {sp ? "重寫" : "請 Claude 寫精簡指令"}
+    </Button>
+  );
+  return (
+    <Section title="精簡指令" hint="Claude 看圖逐項點名">
+      {!sp && (
+        <div className="space-y-2 rounded-lg border border-border bg-muted/40 p-2.5">
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            Claude 先看這張圖，點名畫面裡要保留的門窗、櫃體、家具，只列 1–4 項要改的地方，寫成 100 字左右的短指令。Luma 實測這種寫法在只修一輪時結構保持最好；長篇通用規則容易被模型忽略。
+          </p>
+          {writeBtn}
+          {!claudeReady && (
+            <p className="text-[11px] text-muted-foreground">
+              需要 Claude 金鑰：請管理者到
+              <Link href="/settings" className="mx-1 font-medium text-foreground underline">
+                設定
+              </Link>
+              輸入。
+            </p>
+          )}
+        </div>
+      )}
+      {sp && (
+        <div className="space-y-2">
+          {stale && (
+            <p className="flex items-start gap-1.5 rounded-md bg-warning/10 px-2.5 py-1.5 text-[11px] text-warning">
+              <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              寫完之後需求、框選、參考圖或積木有改過，指令可能點名錯物件，建議重寫。
+            </p>
+          )}
+          {sp.summaryZh && <p className="rounded-md bg-muted px-2.5 py-1.5 text-[11px] leading-relaxed">{sp.summaryZh}</p>}
+          {sp.warningsZh.map((w, i) => (
+            <p key={i} className="flex items-start gap-1.5 text-[11px] text-warning">
+              <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              {w}
+            </p>
+          ))}
+          <textarea
+            className={cn(inputCls, "min-h-[9rem] font-mono text-[11px] leading-relaxed")}
+            disabled={!editable}
+            value={sp.text}
+            onChange={(e) =>
+              patch((x) => {
+                if (!x.shortPrompt) return;
+                x.shortPrompt.text = e.target.value;
+                x.shortPrompt.edited = true;
+              })
+            }
+          />
+          {sp.keep.length > 0 && (
+            <p className="text-[11px] text-muted-foreground">點名保留 {sp.keep.length} 項：{sp.keep.join("；")}</p>
+          )}
+          <label className="flex items-start gap-2 text-xs">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              disabled={!editable}
+              checked={sp.use}
+              onChange={(e) => patch((x) => void (x.shortPrompt && (x.shortPrompt.use = e.target.checked)))}
+            />
+            <span>
+              出圖與任務包使用這段精簡指令
+              <span className="block text-[11px] text-muted-foreground">取消勾選就改回下方的完整編譯指令。</span>
+            </span>
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            {writeBtn}
+            <Button size="sm" variant="ghost" onClick={() => navigator.clipboard.writeText(sp.text)}>
+              <Copy /> 複製
+            </Button>
+            <span className="text-[10px] text-muted-foreground">
+              {sp.model}・{new Date(sp.at).toLocaleString("zh-TW", { hour12: false })}
+              {sp.edited && "・已手動修改"}
+            </span>
+          </div>
+        </div>
+      )}
+    </Section>
   );
 }
 
@@ -847,27 +976,36 @@ function RunTab({
   setImportOpts: (o: { align: boolean; composite: boolean; feather: number }) => void;
   onExport: () => void;
   onImport: (f: File) => void;
-  onApi: (q: "medium" | "high") => void;
+  onApi: (q: "medium" | "high", provider: ApiProviderId) => void;
   onMarkFailed: () => void;
   onReopen: () => void;
 }) {
   const { data: company } = useCompany();
-  const apiReady = !!company?.openai.configured || !!live?.live;
-  // 後台有金鑰就預設走 API，省掉 ChatGPT 往返；沒有就維持手動
-  const [provider, setProviderState] = React.useState<"manual" | "openai">(apiReady ? "openai" : "manual");
+  const ready: Record<ApiProviderId, boolean> = {
+    openai: !!company?.openai.configured || !!live?.live,
+    google: !!company?.google.configured,
+  };
+  // 後台有金鑰就預設走 API，省掉手動往返；Google 在 Luma 調查中寫實度最好，兩家都有時優先
+  const preferred: ProviderId = ready.google ? "google" : ready.openai ? "openai" : "manual";
+  const [provider, setProviderState] = React.useState<ProviderId>(preferred);
   const touched = React.useRef(false);
-  const setProvider = (p: "manual" | "openai") => {
+  const setProvider = (p: ProviderId) => {
     touched.current = true;
     setProviderState(p);
   };
-  // 後台設定晚一步載入時，使用者還沒自己選過才切到 API
+  // 後台設定晚一步載入時，使用者還沒自己選過才切換
   React.useEffect(() => {
-    if (apiReady && !touched.current) setProviderState("openai");
-  }, [apiReady]);
+    if (!touched.current) setProviderState(preferred);
+  }, [preferred]);
   const [consent, setConsent] = React.useState(false);
+  // 同意的是「傳給哪一家」，換供應商就要重新勾
+  React.useEffect(() => setConsent(false), [provider]);
   const [quality, setQuality] = React.useState<"medium" | "high">(company?.openai.extra.quality ?? "high");
-  const cap = company?.openai.monthlyCap ?? null;
-  const capLeft = cap === null || !company ? null : cap - company.usage.openaiImages;
+  const apiProvider: ApiProviderId | null = provider === "manual" ? null : provider;
+  const apiReady = apiProvider ? ready[apiProvider] : false;
+  const cap = apiProvider ? (company?.[apiProvider].monthlyCap ?? null) : null;
+  const used = apiProvider === "google" ? company?.usage.googleImages : company?.usage.openaiImages;
+  const capLeft = cap === null || !company ? null : cap - (used ?? 0);
   const blocked = risks.some((r) => r.level === "error");
   const fileRef = React.useRef<HTMLInputElement>(null);
   const hasRegions = v.regions.some((r) => r.kind !== "lock");
@@ -886,22 +1024,23 @@ function RunTab({
       )}
 
       <Section title="生成方式">
-        <Segmented<"manual" | "openai">
+        <Segmented<ProviderId>
           value={provider}
           onChange={setProvider}
           options={[
-            { value: "manual", label: PROVIDER_CAPS.manual.label },
-            { value: "openai", label: PROVIDER_CAPS.openai.label },
+            { value: "manual", label: "手動任務包" },
+            { value: "openai", label: "OpenAI" },
+            { value: "google", label: "Google" },
           ]}
         />
         <p className="text-[11px] text-muted-foreground">{PROVIDER_CAPS[provider].note}</p>
       </Section>
 
       {provider === "manual" ? (
-        <Section title="ChatGPT 手動流程" hint="零 API 成本">
+        <Section title="手動任務包（ChatGPT／Luma）" hint="零 API 成本">
           <ol className="list-decimal space-y-1 pl-4 text-[11px] leading-relaxed text-muted-foreground">
             <li>下載任務包（底圖、參考圖已依序編號，附提示詞與說明）。</li>
-            <li>每個版本開一個新的 ChatGPT 對話，依編號上傳、貼上提示詞。</li>
+            <li>每個版本開一個新的 ChatGPT 對話，依編號上傳、貼上提示詞；用 Luma 時選 Modify Image → Nano Banana Pro。</li>
             <li>下載結果原檔，回到這裡匯入。不要在同一對話裡連修第二、三次。</li>
           </ol>
           <Button className="w-full" disabled={!!busy || blocked || !canRun} onClick={onExport}>
@@ -915,10 +1054,10 @@ function RunTab({
           )}
         </Section>
       ) : (
-        <Section title="API 生成">
-          {!apiReady ? (
+        <Section title={`${PROVIDER_CAPS[provider].label} 生成`}>
+          {!apiReady || !apiProvider ? (
             <p className="rounded-md bg-muted px-3 py-2 text-[11px] text-muted-foreground">
-              還沒有可用的 OpenAI 金鑰。請管理者到右上角
+              還沒有可用的 {apiProvider === "google" ? "Google" : "OpenAI"} 金鑰。請管理者到右上角
               <Link href="/settings" className="mx-1 font-medium text-foreground underline">
                 設定
               </Link>
@@ -927,22 +1066,32 @@ function RunTab({
           ) : (
             <>
               <p className="text-[11px] text-muted-foreground">
-                模型：{company?.openai.model || live?.model}（後台設定）
+                模型：{apiProvider === "google" ? `${company?.google.model}，${company?.google.extra.size}` : company?.openai.model || live?.model}（後台設定）
                 {capLeft !== null && `｜本月全公司剩 ${Math.max(0, capLeft)} 張`}
               </p>
-              <Segmented<"medium" | "high">
-                value={quality}
-                onChange={setQuality}
-                options={[
-                  { value: "medium", label: "標準" },
-                  { value: "high", label: "高品質" },
-                ]}
-              />
+              <p className="text-[11px] text-muted-foreground">
+                指令：{v.shortPrompt?.use ? "Claude 精簡指令" : "完整編譯指令"}（在「1 指令」頁切換）
+                {apiProvider === "google" && hasRegions && "｜框選位置以座標描述，匯入時框外還原成底圖"}
+              </p>
+              {apiProvider === "openai" && (
+                <Segmented<"medium" | "high">
+                  value={quality}
+                  onChange={setQuality}
+                  options={[
+                    { value: "medium", label: "標準" },
+                    { value: "high", label: "高品質" },
+                  ]}
+                />
+              )}
               <label className="flex items-start gap-2 text-xs">
                 <input type="checkbox" className="mt-0.5" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-                我有權使用這些圖片，同意將底圖、遮罩與參考圖傳送至 OpenAI 進行付費處理（1 張、不自動重試）。
+                我有權使用這些圖片，同意將底圖{apiProvider === "openai" ? "、遮罩" : ""}與參考圖傳送至 {apiProvider === "google" ? "Google" : "OpenAI"} 進行付費處理（1 張、不自動重試）。
               </label>
-              <Button className="w-full" disabled={!consent || !!busy || blocked || !canRun || (capLeft !== null && capLeft <= 0)} onClick={() => onApi(quality)}>
+              <Button
+                className="w-full"
+                disabled={!consent || !!busy || blocked || !canRun || (capLeft !== null && capLeft <= 0)}
+                onClick={() => onApi(quality, apiProvider)}
+              >
                 {busy === "api" ? <Loader2 className="animate-spin" /> : <Send />} 送出生成
               </Button>
             </>
@@ -1029,6 +1178,7 @@ function QaTab({
   onState,
   onAccept,
   onRepair,
+  onLookRedo,
   onClaude,
 }: {
   project: RenderProject;
@@ -1038,6 +1188,7 @@ function QaTab({
   onState: (s: Version["state"], detail?: string) => void;
   onAccept: (by: string, note: string) => void;
   onRepair: () => void;
+  onLookRedo: () => void;
   onClaude: () => void;
 }) {
   const device = useDeviceSettings();
@@ -1190,6 +1341,16 @@ function QaTab({
           <Button size="sm" className="w-full" disabled={!!busy} onClick={onRepair}>
             開修正版本（框選問題區域）
           </Button>
+        )}
+        {v.resultAssetId && v.state !== "accepted" && (
+          <div className="space-y-1">
+            <Button size="sm" variant="outline" className="w-full" disabled={!!busy} onClick={onLookRedo}>
+              {busy === "look" ? <Loader2 className="animate-spin" /> : <Sparkles />} 用 3D 原圖重做，沿用這版光影
+            </Button>
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              光影滿意、但牆面或布面有水波紋時用：以乾淨原圖為底，這一版只借光線、色調與人物，不借表面紋理。比在這張上一修再修有效。
+            </p>
+          </div>
         )}
         {repairsUsed(project, v.viewId) >= project.repairLimit && (
           <p className="text-[11px] text-warning">

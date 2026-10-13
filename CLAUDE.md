@@ -38,11 +38,12 @@ Next.js 14.2（App Router）＋ TypeScript ＋ Tailwind（CSS 變數色票，支
 | `app/(studio)/page.tsx` | 專案列表（首頁） |
 | `app/(studio)/p/[projectId]/page.tsx` | 專案工作區：畫布／物件聖經／360 環景／交付 |
 | `app/login`、`app/api/auth/*` | 登入頁、寄信、回呼、登出；cookie 名 `render_session` |
-| `app/api/render/generate`、`status` | OpenAI 出圖（伺服器呼叫，金鑰取自後台，其次 Vercel 環境變數） |
+| `app/api/render/generate`、`status` | 出圖：OpenAI 或 Google Nano Banana（表單 `provider`；伺服器呼叫，金鑰取自後台，OpenAI 其次 Vercel 環境變數） |
+| `app/api/prompt` | Claude 精簡指令（看底圖逐項點名保留物件，與驗收共用 Claude 月上限） |
 | `app/api/review` | Claude 看圖驗收（伺服器呼叫） |
 | `app/api/settings`、`settings/key` | 公司設定讀寫（管理者才能改）、金鑰設定／測試／清除 |
 | `app/(studio)/settings`、`components/settings/` | 設定頁：金鑰、模型、全公司月上限、用量、空間與圖號預設 |
-| `lib/server/` | 只在伺服器執行：`store`（Vercel Blob 私有／本機檔案）、`crypto`（AES-GCM）、`company`（設定、用量、上限）、`openai`、`claude`、`session` |
+| `lib/server/` | 只在伺服器執行：`store`（Vercel Blob 私有／本機檔案）、`crypto`（AES-GCM）、`company`（設定、用量、上限）、`openai`、`google`、`claude`、`session` |
 | `components/render/` | `Workspace`、`CanvasBoard`（畫布＋手勢）、`VersionEditor`、`AnnotationStage`（框選／筆刷／比較）、`ScenePanel`、`PanoPanel`、`DeliveryPanel` |
 | `lib/render/types.ts` | 領域型別：視角、版本、區域、場景物件、全景、專案 |
 | `lib/render/workflow.ts` | 版本狀態機；主圖改版 → 衍生版本「需重驗」 |
@@ -53,8 +54,8 @@ Next.js 14.2（App Router）＋ TypeScript ＋ Tailwind（CSS 變數色票，支
 | `lib/render/db.ts`、`store/render-store.ts` | IndexedDB 儲存、zustand 狀態 |
 | `lib/render/company-types.ts`、`company.ts` | 公司設定共用型別、預設空間與圖號、圖號建議；瀏覽器端讀寫 hook |
 | `lib/render/settings.ts` | 本裝置小偏好（只有核准者姓名） |
-| `lib/render/provider.ts` | 出圖供應商：手動任務包、伺服器路由 |
-| `lib/render/claude.ts` | Claude 驗收的瀏覽器端：準備圖片與說明、呼叫 `/api/review` |
+| `lib/render/provider.ts` | 出圖供應商：手動任務包（ChatGPT／Luma）、OpenAI、Google，皆走伺服器路由 |
+| `lib/render/claude.ts` | Claude 的瀏覽器端：驗收（`/api/review`）、寫精簡指令（`/api/prompt`） |
 | `components/render/ViewDialog.tsx` | 新增／編輯視角：插入圖片、空間選單、圖號自動、主圖關係 |
 | `lib/render/options.ts` | 表單選項（樓層、景別、錨點、風格…） |
 | `lib/render/seed.ts` | 「中道森活一樓」範本專案（不含客戶圖片） |
@@ -62,7 +63,7 @@ Next.js 14.2（App Router）＋ TypeScript ＋ Tailwind（CSS 變數色票，支
 ## 必守規則
 
 1. **客戶圖面不進 git**：渲染圖、平面圖、建商資料一律不 commit（含測試素材）。範本只放文字設定。
-2. **不讀、不產生、不印出秘密值**：`AUTH_SECRET`、`RESEND_API_KEY`、`BLOB_READ_WRITE_TOKEN` 等在 Vercel；OpenAI／Claude 金鑰由管理者在工作台「設定」頁輸入，加密存後台。不要在對話索取金鑰、不要用 Vercel MCP 解密環境變數或讀後台設定檔；測試一律用本機模擬供應商（`OPENAI_BASE_URL`、`ANTHROPIC_BASE_URL`）＋`SETTINGS_STORE_DIR`。
+2. **不讀、不產生、不印出秘密值**：`AUTH_SECRET`、`RESEND_API_KEY`、`BLOB_READ_WRITE_TOKEN` 等在 Vercel；OpenAI／Google／Claude 金鑰由管理者在工作台「設定」頁輸入，加密存後台。不要在對話索取金鑰、不要用 Vercel MCP 解密環境變數或讀後台設定檔；測試一律用本機模擬供應商（`OPENAI_BASE_URL`、`GOOGLE_AI_BASE_URL`、`ANTHROPIC_BASE_URL`）＋`SETTINGS_STORE_DIR`。
 3. **付費 API 預設關閉**：後台沒金鑰、Vercel 也沒開 `RENDER_LIVE=1`＋`OPENAI_API_KEY`＋`OPENAI_IMAGE_MODEL` 時不可呼叫；不要自行開啟或預填金鑰。每次 1 張、每次勾同意、不自動重試（SDK `maxRetries: 0`）、結果未知不重送；全公司月上限由伺服器把關（`assertUnderCap`），供應商後台另設硬上限。
 7. **金鑰只在伺服器解密使用**：回應、log、錯誤訊息、IndexedDB、專案備份、交付包、提示詞、事件紀錄一律不可含金鑰（只給末四碼）；寫入設定一律檢查管理者（`isAdminEmail`）。
 4. **不 force-push、不改寫 `main` 歷史**。功能用分支＋PR。
@@ -80,6 +81,9 @@ Next.js 14.2（App Router）＋ TypeScript ＋ Tailwind（CSS 變數色票，支
 - **公司設定（後台）**：`settings/company.json`（金鑰以 `v1.` 開頭的 AES-GCM 密文＋末四碼、模型、上限、空間預設）與 `usage/YYYY-MM.json`（全公司與每人用量），存在 Vercel Blob（private，`useCache: false` 讀、ETag 樂觀鎖寫）。模型清單由「測試並儲存」呼叫供應商 `/v1/models` 動態載入，不寫死。管理者＝`ADMIN_EMAILS`，未設定時是 `ALLOWED_EMAILS` 第一位。出圖與驗收路由 `maxDuration = 300`。Claude 在伺服器用 `@anthropic-ai/sdk`；Opus 5.5／Sonnet 5.5 等加 `fallbacks: "default"`；結果寫在選填欄位 `qa.aiReview`，只是建議，判定與核准仍由人按。
 - **後台寫入的 ETag**（`lib/server/store.ts`）：樂觀鎖的 ETag 一律取自 `head()`，**不要用 `get()` 回應的 ETag**（格式不同，`put({ ifMatch })` 會一律 412，曾讓第二把金鑰存不進去）。被拒後重讀、ETag 沒變就不帶條件覆寫，最多 5 次。
 - **整張增強 vs 局部修改**：沒有修改區時編譯器自動略過 `keep-outside`（否則等於叫模型整張不准動）；`enh-*` 積木（寫實光影、材質質感、建築攝影成像）預設關閉，由「一鍵：整體渲染增強」加入。有修改區時框外仍回貼 3D 原圖，增強只留在框內。
+- **Google 出圖**（`lib/server/google.ts`）：沒有遮罩，框選靠座標描述、匯入時框外回貼；底圖排第一並在每張圖前標「Image N」，與指令裡的 image N 對齊；`imageConfig` 比例取最接近底圖的固定比例，匯入時鏡位校正回原尺寸。回傳前用 `sharp` 轉 JPEG（PNG 會超過 Vercel 回應上限），所以不提供 4K。模型名稱常改，一律從 `/v1beta/models` 動態載入，不寫死。Google 專案必須綁付費帳戶（免費層資料可能被拿去訓練）。
+- **精簡指令**（Luma 調查的結論）：短、逐圖點名保留物件、只列 1–4 項變更；禁止「all windows／any visible cabinetry／統一」這類泛指。版本的 `shortPrompt.use` 為真時，API 出圖與任務包都用它（`activePrompt`）；`basis` 指紋不符就提醒重寫。
+- **風格預設與光影參考**（Codex 奶油風案例）：`STYLE_PRESETS` 一次增刪積木並移除互斥項（黃金時刻 vs 自然窗光、動態人物 vs 雜誌攝影不加人物）；`style-film` 不加顆粒。參考角色 `look`＝同視角先前光影版，只借光線、色調、人物，不借表面紋理；`redoFromOriginalWithLook` 以 3D 原圖重做並把結果放成第一張參考圖（image 2），世代深度歸零。
 - **出圖尺寸**：瀏覽器送 2048 長邊底圖與原圖寬高；`outputSizeFor` 只對 gpt-image-2 指定尺寸（16 的倍數、長邊 ≤3840、總像素 655,360–8,294,400、比例 ≤3:1），其他模型或超出規則回 `auto`。不要送 `input_fidelity` 給 gpt-image-2。
 - **空間與圖號**：新增視角的空間清單來自後台 `rooms`（`DEFAULT_ROOMS` 為預設）；圖號留空時 `suggestViewNumbers` 依起始號找空號，沒起始號接最大號。視角圖號建立後不可改（版本、物件聖經、釘選都以圖號串接）；其他欄位用 `updateView` 改。
 - **表單用選的**：有限選項用 `select`、常見但開放的用 `datalist`、需要兩者時用 `ChoiceInput`（選單＋「其他（自行輸入）」）；選項放 `options.ts`。使用者原文欄位（本輪需求、區域說明）維持自由文字。
@@ -93,7 +97,7 @@ Next.js 14.2（App Router）＋ TypeScript ＋ Tailwind（CSS 變數色票，支
 - 桌機：載入範本 → 上傳原圖 → 開版本／框選 → 匯入 AI 結果（驗證放大、對位、回貼、水波紋）→ 核准 → 360 縫合 → 交付 ZIP。
 - 手機：`isMobile + hasTouch`，用 CDP `Input.dispatchTouchEvent` 模擬單指滑、雙指放大／收合、雙指中途放開一指、快速連續縮放；檢查無 `Application error`、無 pageerror。
 - 測試用 cookie：本機用測試 `AUTH_SECRET` 簽一個 `render_session` JWT，**不要用正式金鑰**。
-- 後台與供應商：`SETTINGS_STORE_DIR=<scratchpad 資料夾>` 讓設定存本機檔案；自寫模擬伺服器回應 `/v1/models`、`/v1/images/edits`、`/v1/messages`，以 `OPENAI_BASE_URL`、`ANTHROPIC_BASE_URL` 指過去（記得 `NO_PROXY=localhost`）。驗證：金鑰不出現在 API 回應與 localStorage、非管理者 PATCH 回 403、月上限回 429。
+- 後台與供應商：`SETTINGS_STORE_DIR=<scratchpad 資料夾>` 讓設定存本機檔案；自寫模擬伺服器回應 `/v1/models`、`/v1/images/edits`、`/v1beta/models`、`/v1beta/models/{m}:generateContent`、`/v1/messages`，以 `OPENAI_BASE_URL`、`GOOGLE_AI_BASE_URL`（含 `/v1beta`）、`ANTHROPIC_BASE_URL` 指過去（記得 `NO_PROXY=localhost`）。驗證：金鑰不出現在 API 回應與 localStorage、非管理者 PATCH 回 403、月上限回 429。
 - 測試素材放 scratchpad（ASCII 檔名，Playwright `setFiles` 不吃中文路徑），不進 repo。
 
 ## 部署

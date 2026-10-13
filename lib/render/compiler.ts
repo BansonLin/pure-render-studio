@@ -6,6 +6,7 @@ import type {
   RenderView,
   ReferenceSlot,
   SceneObject,
+  Version,
 } from "./types";
 
 /**
@@ -159,6 +160,11 @@ export function compilePrompt(input: CompileInput): CompileOutput {
           `- Image ${n} = STYLE reference "${label}" for mood and color only${note ? ` (${note})` : ""}; no objects or layout.`,
         );
         break;
+      case "look":
+        lines.push(
+          `- Image ${n} = LOOK reference "${label}": the SAME camera after an earlier lighting pass. Copy ONLY its time-of-day light, light direction, exposure, color grading${note ? ` and ${note}` : " and any person's identity and position"}. NEVER copy its surface textures, ripples, grain or microtexture: every surface keeps image 1's clean finish.`,
+        );
+        break;
       case "annotation":
         lines.push(
           `- Image ${n} = ANNOTATION GUIDE with numbered boxes marking the regions below. It is NOT content: never reproduce boxes, numbers, arrows or overlay colors.`,
@@ -262,7 +268,9 @@ export function compilePrompt(input: CompileInput): CompileOutput {
 
   // 6) 排除與輸出
   lines.push("");
-  lines.push(`REJECT: ${REJECT_LIST}.`);
+  // 「不准新增物件」會把要求的人物一起擋掉
+  const person = blocks.some((b) => b.id === "people-motion");
+  lines.push(`REJECT: ${REJECT_LIST}${person ? " (the single requested walking person is the only allowed addition)" : ""}.`);
   for (const t of byCat("output")) lines.push(t);
 
   zh.push(`積木 ${blocks.length} 塊：${blocks.map((b) => b.label).join("、")}`);
@@ -280,12 +288,16 @@ export interface RiskInput {
   repairsUsed: number;
   repairLimit: number;
   maxReferences: number;
+  /** 本輪需求與各區說明原文，用來抓全圖泛指的說法 */
+  requestTexts?: string[];
 }
 
 export interface Risk {
   level: "error" | "warn" | "info";
   text: string;
 }
+
+const GLOBAL_PHRASES = /(所有|全部|全室|整組|統一|每一扇|每個|\ball (the )?windows\b|\bany visible\b|\bglobally\b|\bthroughout\b)/i;
 
 /** 送出前檢查（顯示給設計師，非保證） */
 export function preflight(r: RiskInput): Risk[] {
@@ -316,7 +328,32 @@ export function preflight(r: RiskInput): Risk[] {
       level: "warn",
       text: `已用 ${r.repairsUsed} 次定向修正，達專案上限 ${r.repairLimit}。建議停下來人工判斷：回原圖重建、人工修圖或調整範圍。`,
     });
+  if ((r.requestTexts ?? []).some((t) => GLOBAL_PHRASES.test(t)))
+    out.push({
+      level: "warn",
+      text: "需求裡有「所有／統一／整組」這類全圖泛指的說法。Luma 實測這種指令會讓模型憑空加窗、把白櫃改成木紋、吊燈掛錯位置。請逐項點名要改的物件（例如「客廳落地窗加亞麻窗簾」），或分視角各自處理。",
+    });
   if (r.editRegionCount > 0 && r.baseStrategy !== "original")
     out.push({ level: "info", text: "匯入結果後，系統會把選區外的像素回貼成底圖，避免非修改區劣化。" });
   return out;
+}
+
+/**
+ * 精簡指令依據的指紋：需求、選區、參考圖、積木或底圖變了，舊指令就可能點名錯物件，
+ * 介面據此提醒重寫。用短雜湊避免把筆刷點列整串存進版本。
+ */
+export function promptBasis(v: Pick<Version, "rawRequest" | "regions" | "references" | "blockIds" | "baseAssetId">): string {
+  const src = JSON.stringify([
+    v.baseAssetId,
+    v.rawRequest.trim(),
+    v.regions.map((r) => [r.kind, r.shape, r.instruction.trim(), r.objectId, r.blockIds]),
+    v.references.map((r) => [r.assetId, r.role, r.note.trim()]),
+    [...v.blockIds].sort(),
+  ]);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < src.length; i++) {
+    h ^= src.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
 }

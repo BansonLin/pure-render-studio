@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { ModelOption } from "@/lib/render/company-types";
 import { decryptSecret } from "@/lib/server/crypto";
 import { listClaudeModels } from "@/lib/server/claude";
 import { loadCompany, publicSettings, sealKey, updateCompany } from "@/lib/server/company";
+import { listGoogleImageModels } from "@/lib/server/google";
 import { listOpenAIImageModels } from "@/lib/server/openai";
 import { sessionUser } from "@/lib/server/session";
 import { storeMode } from "@/lib/server/store";
@@ -9,8 +11,13 @@ import { storeMode } from "@/lib/server/store";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type Provider = "openai" | "claude";
-const isProvider = (p: unknown): p is Provider => p === "openai" || p === "claude";
+type Provider = "openai" | "google" | "claude";
+const isProvider = (p: unknown): p is Provider => p === "openai" || p === "google" || p === "claude";
+const LISTERS: Record<Provider, (key: string) => Promise<ModelOption[]>> = {
+  openai: listOpenAIImageModels,
+  google: listGoogleImageModels,
+  claude: listClaudeModels,
+};
 
 /**
  * 設定或重新測試金鑰（管理者）。
@@ -44,9 +51,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "已存的金鑰無法解密（可能更換過 AUTH_SECRET），請按「更換金鑰」重新輸入。" }, { status: 400 });
     }
   }
-  let models;
+  let models: ModelOption[];
   try {
-    models = provider === "openai" ? await listOpenAIImageModels(key) : await listClaudeModels(key);
+    models = await LISTERS[provider](key);
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 });
   }

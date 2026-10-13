@@ -2,10 +2,10 @@
 
 import { assetBlob, useRenderStore } from "@/store/render-store";
 import { annotationGuide, buildCandidate, maskPng, runRippleQa } from "./composite";
-import { COMPILER_VERSION, compilePrompt, shapeBounds } from "./compiler";
+import { COMPILER_VERSION, compilePrompt, promptBasis, shapeBounds } from "./compiler";
 import { canvasToBlob, ctx2d, decodeImage, downloadBlob, makeCanvas, uid, blobToBase64, base64ToBlob } from "./image";
 import { DEFAULT_BLOCK_IDS } from "./prompt-blocks";
-import { generateViaApi, OutcomeUnknownError, PROVIDER_CAPS } from "./provider";
+import { generateViaApi, OutcomeUnknownError, PROVIDER_CAPS, type ApiProviderId } from "./provider";
 import { REFERENCE_ROLE_LABEL } from "./types";
 import type { AssetKind, AssetMeta, BaseStrategy, ReferenceSlot, RenderProject, Version } from "./types";
 import { childDepth, DEFAULT_QA_CHECKS, invalidateDependents, nextLabel, versionsOf } from "./workflow";
@@ -163,6 +163,26 @@ export async function createDraft(projectId: string, viewId: string, strategy: B
   return id;
 }
 
+/**
+ * 光影滿意、表面卻有水波紋或怪紋時：從乾淨的 3D 原圖重做，這一版只當「光影參考」。
+ * Codex 奶油風案例實測：比在有紋路的圖上一修再修有效，也把世代深度歸零。
+ */
+export async function redoFromOriginalWithLook(projectId: string, versionId: string) {
+  const p = project(projectId);
+  const v = p.versions.find((x) => x.id === versionId);
+  if (!v?.resultAssetId) throw new Error("這個版本還沒有 AI 結果。");
+  const look = v.resultAssetId;
+  const id = await createDraft(projectId, v.viewId, "original");
+  await patchVersion(projectId, id, (x) => {
+    x.rawRequest = v.rawRequest;
+    x.blockIds = [...v.blockIds];
+    // 光影參考排第一張參考圖（image 2），與指令裡的編號對齊
+    x.references = [{ assetId: look, role: "look", note: "", source: "manual" }, ...x.references.filter((r) => r.assetId !== look)];
+    x.events.push({ at: now(), type: "look_redo", detail: `沿用 ${v.label} 的光影，從 3D 原圖重做` });
+  });
+  return id;
+}
+
 export async function patchVersion(projectId: string, versionId: string, fn: (v: Version) => void) {
   await store().mutate(projectId, (d) => {
     const v = d.versions.find((x) => x.id === versionId);
@@ -200,6 +220,31 @@ export function compileVersion(p: RenderProject, v: Version, assets: Record<stri
   });
 }
 
+/**
+ * 實際要送出的指令：有勾「使用精簡指令」就用 Claude 寫的短指令，否則用積木編譯的完整版。
+ * 任務包附標註示意圖時補一句，避免模型把框線畫進結果。
+ */
+export function activePrompt(
+  p: RenderProject,
+  v: Version,
+  assets: Record<string, AssetMeta>,
+  opts: { includeSceneContract: boolean; maskSupported: boolean; annotation: boolean },
+): { prompt: string; source: "short" | "compiled" } {
+  const sp = v.shortPrompt;
+  if (sp?.use && sp.text.trim()) {
+    const guide =
+      opts.annotation && v.regions.length
+        ? `\n\nThe last image (image ${v.references.length + 2}) is only a location guide for the marked areas: never draw its boxes, lines or labels.`
+        : "";
+    return { prompt: sp.text.trim() + guide, source: "short" };
+  }
+  return { prompt: compileVersion(p, v, assets, opts).prompt, source: "compiled" };
+}
+
+export function shortPromptStale(v: Version): boolean {
+  return !!v.shortPrompt && v.shortPrompt.basis !== promptBasis(v);
+}
+
 function pinMasters(p: RenderProject, viewId: string) {
   const view = p.views.find((x) => x.id === viewId)!;
   return view.dependsOn
@@ -219,7 +264,7 @@ export async function exportManualPackage(projectId: string, versionId: string, 
   const p = project(projectId);
   const v = p.versions.find((x) => x.id === versionId)!;
   const assets = store().assets;
-  const { prompt } = compileVersion(p, v, assets, { ...opts, maskSupported: false });
+  const { prompt } = activePrompt(p, v, assets, { ...opts, maskSupported: false });
   const base = await assetBlob(v.baseAssetId);
   if (!base) throw new Error("找不到底圖檔案");
   const labels = referenceLabels(p, assets);
@@ -248,6 +293,7 @@ export async function exportManualPackage(projectId: string, versionId: string, 
         `專案：${p.code} ${p.name}　視角 ${v.viewId}　版本 ${v.label}`,
         "",
         "1. 開啟 ChatGPT 新對話（每個版本開新對話，避免前文干擾）。",
+        "   也可用在 Luma：圖片按右鍵 → Modify Image → 選 Nano Banana Pro，01 當來源、其餘加到 References，貼上提示詞。",
         `2. 依檔名編號順序上傳 01 ～ ${String(n - 1).padStart(2, "0")} 的圖片（01 一定是編輯目標）。`,
         "3. 貼上「提示詞.txt」全文送出。",
         "4. 下載結果原檔（不要截圖），回到工作台此版本按「匯入 AI 結果」。",
@@ -310,13 +356,18 @@ export async function importResult(projectId: string, versionId: string, file: B
   return built.notes;
 }
 
-export async function runApiGeneration(projectId: string, versionId: string, opts: ImportOptions & { includeSceneContract: boolean; quality: "medium" | "high" }) {
+export async function runApiGeneration(
+  projectId: string,
+  versionId: string,
+  opts: ImportOptions & { includeSceneContract: boolean; quality: "medium" | "high"; provider: ApiProviderId },
+) {
   const p = project(projectId);
   const v = p.versions.find((x) => x.id === versionId)!;
-  if (v.references.length > PROVIDER_CAPS.openai.maxReferences) throw new Error(`API 模式參考圖最多 ${PROVIDER_CAPS.openai.maxReferences} 張`);
+  const caps = PROVIDER_CAPS[opts.provider];
+  if (v.references.length > caps.maxReferences) throw new Error(`${caps.label} 參考圖最多 ${caps.maxReferences} 張`);
   const base = await assetBlob(v.baseAssetId);
   if (!base) throw new Error("找不到底圖檔案");
-  const { prompt } = compileVersion(p, v, store().assets, { includeSceneContract: opts.includeSceneContract, maskSupported: true, annotation: false });
+  const { prompt } = activePrompt(p, v, store().assets, { includeSceneContract: opts.includeSceneContract, maskSupported: caps.mask, annotation: false });
   const toJpeg = async (b: Blob, maxW: number) => {
     const bmp = await decodeImage(b);
     const w = Math.min(maxW, bmp.width);
@@ -330,7 +381,8 @@ export async function runApiGeneration(projectId: string, versionId: string, opt
   const baseJ = await toJpeg(base, 2048);
   const bmp = await decodeImage(baseJ);
   const dims = { width: bmp.width, height: bmp.height };
-  const mask = v.regions.some((r) => r.kind !== "lock") ? await maskPng(v.regions, bmp.width, bmp.height) : null;
+  // 沒有遮罩的供應商靠提示詞裡的座標描述，匯入時再把選區外回貼底圖
+  const mask = caps.mask && v.regions.some((r) => r.kind !== "lock") ? await maskPng(v.regions, bmp.width, bmp.height) : null;
   bmp.close();
   const refs: Blob[] = [];
   for (const r of v.references) {
@@ -340,14 +392,14 @@ export async function runApiGeneration(projectId: string, versionId: string, opt
   const requestId = uid("req");
   await patchVersion(projectId, versionId, (x) => {
     x.compiledPrompt = prompt;
-    x.provider = "openai";
+    x.provider = opts.provider;
     x.providerJobId = requestId;
     x.pinnedMasters = pinMasters(p, v.viewId);
     x.state = "submitted";
     x.events.push({ at: now(), type: "api_submitted", detail: requestId });
   });
   try {
-    const out = await generateViaApi({ requestId, prompt, base: baseJ, mask, references: refs, quality: opts.quality, ...dims });
+    const out = await generateViaApi({ provider: opts.provider, requestId, prompt, base: baseJ, mask, references: refs, quality: opts.quality, ...dims });
     await patchVersion(projectId, versionId, (x) => {
       x.events.push({ at: now(), type: "api_returned", detail: `model=${out.model ?? "unknown"}` });
     });

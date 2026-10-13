@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { ModelOption } from "@/lib/render/company-types";
 
 /**
- * Claude 看圖驗收（伺服器端）。金鑰從後台解密後只在這裡使用。
+ * Claude 看圖驗收與寫精簡指令（伺服器端）。金鑰從後台解密後只在這裡使用。
  * 不自動重試：與出圖同一原則，花錢的請求失敗就停下來讓人決定。
  */
 
@@ -131,6 +131,81 @@ export async function runReview(cfg: { key: string; model: string; effort: "medi
     instructionsFollowed: out.instructions_followed,
     checks: out.checks.filter((x) => known.has(x.id)),
     issues: out.issues,
+    usage: { input: res.usage.input_tokens + (res.usage.cache_read_input_tokens ?? 0), output: res.usage.output_tokens },
+  };
+}
+
+// ---- 精簡指令：Claude 看底圖，逐項點名要保留的物件，寫給影像模型的短指令 ----
+
+const PromptSchema = z.object({
+  prompt: z.string(),
+  keep: z.array(z.string()),
+  summary_zh: z.string(),
+  warnings_zh: z.array(z.string()),
+});
+
+// 規則來自 2026-10 Luma 調查（13 張渲染、3 輪修改）：短而點名的指令結構最穩；
+// 「all windows」「any visible cabinetry」這類泛指會讓模型憑空加窗、把白櫃改成木紋。
+const WRITER_SYSTEM = `You write image-edit instructions for an interior design firm in Taiwan.
+The edit model (Google Nano Banana Pro or OpenAI GPT Image) receives IMAGE 1 — a 3D interior render and the ONLY edit target — plus optional reference images and your instruction. It redraws the whole picture, so anything you do not explicitly protect may drift.
+
+Rules proven in production:
+1. Short beats long: 60–200 words of plain imperative English sentences. No headings, lists or markdown.
+2. Name things, never generalize. Never write "all windows", "any visible cabinetry", "every", "everything", "globally", "throughout", "the whole set" or "unify". Each change names ONE concrete object by what it is and where it sits in the frame ("the white sofa in the lower left", "the pendant above the dining table").
+3. 1 to 4 changes, taken ONLY from the designer's request, the marked regions and the selected intents. Never invent extra changes, furniture, decor, windows, curtains, light fixtures or people.
+4. Then one sentence that starts exactly with "Keep exactly unchanged:" and lists 6–15 specific elements you can actually see in IMAGE 1, each named by color, material and position: walls, every window with its type (for example "the small high window with wooden blinds on the left wall"), every door with its color, ceiling features, built-in and kitchen cabinetry with color and finish, appliances, flooring, the furniture that is not being changed, artwork. List only what is really visible.
+5. Then: "Do not add, remove or move any window, door, opening, light fixture or piece of furniture. Do not change the color or material of cabinetry, doors, kitchen appliances or flooring unless named above." Drop only the part a requested change legitimately needs.
+6. References: for each reference image write "Use image N (short description) as <purpose> reference for <the named object>." Purpose by role: object = copy that object's shape, color and material only; material = copy the surface only; style = mood and color palette only, never layout or objects; master-view = the approved look of the same home from another camera, borrow objects and materials only, never its camera or layout; look = the SAME camera after an earlier lighting pass, copy only its time-of-day light, light direction, color grading and any person's identity and position, never its surface textures (image 1's clean surfaces win).
+7. Marked regions: changes stay inside them. Describe each region by its position in the frame and the given percentages, then write "Change nothing outside these areas."
+8. Realism or lighting intents: one sentence such as "Upgrade material realism with visible wood grain, fabric texture and soft contact shadows, keeping the same light sources and directions." Never add or move light sources and never add daylight or windows that are not visible. For golden hour, name the visible window or glazed door the low sun comes through in THIS view and where the long window-frame shadows fall. For a film or camera look, keep it to one sentence and never ask for film grain.
+8b. Walking-person intent: copy the person's description verbatim from the intent, say exactly where in THIS frame she walks (a clear floor area named by what is around it) and which design elements she must not cover. Without that intent, add no people.
+9. If the request is ambiguous or impossible in this view (for example it mentions a window this camera cannot see), keep the change minimal, skip that part and explain it in warnings_zh.
+10. End with: "Output one photorealistic image with the same camera, framing and aspect ratio as image 1."
+
+Also return: keep = the elements you listed after "Keep exactly unchanged:"; summary_zh = 2–4 short sentences in Traditional Chinese as used in Taiwan telling the designer what will change and what is protected; warnings_zh = Traditional Chinese warnings, empty if none.`;
+
+export interface PromptWriteInput {
+  baseB64: string;
+  references: { b64: string; label: string }[];
+  brief: string;
+}
+
+export async function writeEditPrompt(cfg: { key: string; model: string; effort: "medium" | "high" | "xhigh" }, input: PromptWriteInput) {
+  const fallback = FALLBACK_MODELS.has(cfg.model);
+  const effortOk = !/(haiku-4|sonnet-4-5|claude-3)/.test(cfg.model);
+  const content: Anthropic.Beta.BetaContentBlockParam[] = [
+    { type: "text", text: "IMAGE 1 — the 3D render to edit:" },
+    { type: "image", source: { type: "base64", media_type: "image/jpeg", data: input.baseB64 } },
+  ];
+  input.references.forEach((r, i) => {
+    content.push({ type: "text", text: `IMAGE ${i + 2} — reference: ${r.label}` });
+    content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: r.b64 } });
+  });
+  content.push({ type: "text", text: input.brief });
+  let res;
+  try {
+    res = await client(cfg.key).beta.messages.parse({
+      model: cfg.model,
+      max_tokens: 16000,
+      system: WRITER_SYSTEM,
+      ...(fallback ? { betas: ["server-side-fallback-2026-07-01"] as Anthropic.Beta.AnthropicBeta[], fallbacks: "default" as const } : {}),
+      output_config: { ...(effortOk ? { effort: cfg.effort } : {}), format: betaZodOutputFormat(PromptSchema) },
+      messages: [{ role: "user", content }],
+    });
+  } catch (e) {
+    throw friendlyClaudeError(e);
+  }
+  if (res.stop_reason === "refusal") throw new Error("Claude 的安全機制拒絕了這次請求（可請管理者換一個模型再試）。");
+  if (res.stop_reason === "max_tokens") throw new Error("Claude 的回答太長被截斷，請再試一次。");
+  const out = res.parsed_output;
+  if (!out || !out.prompt.trim()) throw new Error("Claude 回傳的格式無法解析，請再試一次。");
+  return {
+    at: new Date().toISOString(),
+    model: res.model,
+    text: out.prompt.trim(),
+    keep: out.keep,
+    summaryZh: out.summary_zh,
+    warningsZh: out.warnings_zh,
     usage: { input: res.usage.input_tokens + (res.usage.cache_read_input_tokens ?? 0), output: res.usage.output_tokens },
   };
 }
