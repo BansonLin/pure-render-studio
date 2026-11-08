@@ -66,9 +66,31 @@ Next.js 14.2（App Router）＋ TypeScript ＋ Tailwind（CSS 變數色票，支
 2. **不讀、不產生、不印出秘密值**：`AUTH_SECRET`、`RESEND_API_KEY`、`BLOB_READ_WRITE_TOKEN` 等在 Vercel；OpenAI／Google／Claude 金鑰由管理者在工作台「設定」頁輸入，加密存後台。不要在對話索取金鑰、不要用 Vercel MCP 解密環境變數或讀後台設定檔；測試一律用本機模擬供應商（`OPENAI_BASE_URL`、`GOOGLE_AI_BASE_URL`、`ANTHROPIC_BASE_URL`）＋`SETTINGS_STORE_DIR`。
 3. **付費 API 預設關閉**：後台沒金鑰、Vercel 也沒開 `RENDER_LIVE=1`＋`OPENAI_API_KEY`＋`OPENAI_IMAGE_MODEL` 時不可呼叫；不要自行開啟或預填金鑰。每次 1 張、每次勾同意、不自動重試（SDK `maxRetries: 0`）、結果未知不重送；全公司月上限由伺服器把關（`assertUnderCap`），供應商後台另設硬上限。
 7. **金鑰只在伺服器解密使用**：回應、log、錯誤訊息、IndexedDB、專案備份、交付包、提示詞、事件紀錄一律不可含金鑰（只給末四碼）；寫入設定一律檢查管理者（`isAdminEmail`）。
-4. **不 force-push、不改寫 `main` 歷史**。功能用分支＋PR。
+4. **不 force-push、不改寫 `main` 歷史**。功能用分支＋PR；合併照下方「合併授權」。
 5. **資料在使用者瀏覽器**（IndexedDB，綁網域）。目前 `db.ts` 讀取時**沒有**資料遷移，改 `types.ts` 結構（新增必填欄位、改名）會讓使用者既有專案壞掉：新欄位一律設為選填並在使用處給預設值，或先在 `getProject` 加遷移函式。換網域等於資料歸零，必須先提醒匯出備份。
 6. 介面文字一律繁體中文；註解說明「為什麼」，不寫「做了什麼」。
+
+### 合併授權（Banson 2026-11-07 指示、2026-11-08 確認「照這版寫進去」）
+
+合併進 `main` 就是 Vercel 正式部署。
+
+- **能合併的 PR 一律直接合併**，不用再問 Banson，也不用等另一個引擎：Claude 開的 PR 由 Claude 自己合併；Codex 開的 PR 由 Codex 或 Claude 合併。合併後回報附 PR 連結。
+- **直接合併前要全部做到**：
+  1. CI 全部綠燈、沒有衝突。本 repo 沒有 GitHub Actions，「CI」＝PR 上的檢查（目前只有預覽部署的 `Vercel` 狀態）通過＋推送前三項 `tsc`、`lint`、`build` 全過（改到畫布／手勢再加手機模擬）；
+  2. 做過獨立審查（另一個引擎，或另開的審查代理），找到的問題已修正，或在 PR 寫明為何不修；另一個引擎若已留審查意見，處理完才合併；
+  3. PR 描述三段齊全（改了什麼／怎麼驗證／怎麼回退），回退做得到；
+  4. 有先後順序的照順序合（例如上游 PR 先合，同步 PR 後合）。
+
+  合併方式用「建立合併提交」（merge commit）；合併後確認 Vercel 正式部署成功（READY）再回報。
+- **對外、客戶看得到的內容**（例如 360 客戶單檔 HTML、交付包）也直接合併，但合併前要對照對外文案規則：不寫死服務據點；渲染圖標「示意」；廣告與保固用語合法；不含內部成本與毛利、客訴爭議、人事評價、第三方負面資訊、工具品牌名。回報時寫明已檢查。
+- **只有下面四類仍停下來等 Banson 按**，回報附 PR 連結並寫「等你按合併」，PR 先改成 Ready for review：
+  - ① 權限與登入：角色、帳號、守門邏輯、session、金鑰、對外公開範圍——寫錯會讓資料外洩，外洩撤不回。本 repo 凡動到 `middleware.ts`、`lib/auth/`、`app/login`、`app/api/auth/*`、`lib/server/session.ts`、`lib/server/crypto.ts`、金鑰設定（`app/api/settings`、`settings/key`）、管理者判斷（`isAdminEmail`、`ADMIN_EMAILS`／`ALLOWED_EMAILS`）都算；
+  - ② 金流或會花錢的設定：本 repo 凡開啟或放寬付費 API（`RENDER_LIVE`、預填金鑰、調高或拿掉月上限 `assertUnderCap`、改掉規則 3 的每次 1 張／勾同意／不自動重試）都算；
+  - ③ 網域、DNS（換網域等於使用者資料歸零，見規則 5）；
+  - ④ 會刪除或改寫正式資料的遷移（刪表、刪欄位、批次改資料）：本 repo 的正式資料是後台 Blob 的 `settings/company.json`、`usage/`，以及使用者瀏覽器的 IndexedDB（`db.ts` 的遷移）。
+
+  拿不準算不算這四類，當作算。
+- 其他既有規則不變：花錢、改方向、破壞性動作先停下來問；不部署（合併 `main` 觸發的自動部署除外）、不改 DNS、不操作正式資料庫（本 repo 指 Vercel Blob 後台），除非 Banson 在該任務明確授權。
 
 ## 核心慣例（改動前先讀）
 
